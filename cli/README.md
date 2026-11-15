@@ -1,27 +1,31 @@
-# bp — FastAPI-boilerplate CLI
+<a id="bp-fastapi-boilerplate-cli"></a>
+<a id="bp--fastapi-boilerplate-cli"></a>
 
-`bp` is the developer/operator command-line tool for projects built on the
-FastAPI boilerplate. It generates deployment artifacts, helps prepare the
-runtime environment, and serves as the host for plugin commands and feature
-generators.
+# bp：FastAPI-boilerplate CLI
 
-## Install
+`bp` 是基于 FastAPI 模板的项目所用的开发与运维命令行工具。它生成部署文件、辅助准备运行环境，并承载插件命令和功能生成器。
 
-This package is part of the workspace. From the repo root:
+<a id="install"></a>
+
+## 安装
+
+该包属于 workspace。在仓库根目录运行：
 
 ```bash
 uv sync --all-packages --all-extras   # bp is then available via `uv run bp`
 uv run bp --help
 ```
 
-To install `bp` machine-wide so it works outside this repo:
+如需在仓库外也能使用，将其安装为全局工具：
 
 ```bash
 uv tool install --editable ./cli
 bp --help
 ```
 
-## What's here
+<a id="whats-here"></a>
+
+## 目录内容
 
 ```
 cli/src/cli/
@@ -36,13 +40,13 @@ cli/src/cli/
 └── lib/                   shared helpers (project discovery, prompts, render)
 ```
 
-## Plugin extension points
+<a id="plugin-extension-points"></a>
 
-Two kinds of plugins, kept deliberately separate:
+## 插件扩展点
 
-- `bp.commands` entry-point group — third-party Typer sub-apps mounted under
-  `bp <name>` (e.g. `bp aws deploy`).
-- `bp.features` entry-point group — code generators with a manifest that
-  `bp feature` can list, install, and remove.
+两类插件有意分开：
 
-See `cli/src/cli/plugins.py` for the discovery contracts.
+- `bp.commands` entry-point 组：将第三方 Typer 子应用挂载为 `bp <name>`，例如 `bp aws deploy`。
+- `bp.features` entry-point 组：带有清单的代码生成器，设计上由 `bp feature` 列出、安装和移除。
+
+发现机制的契约见 `cli/src/cli/plugins.py`。`bp feature` 用户命令是否已提供，见[插件指南](../docs/cli/plugins.md)中的实现状态说明。

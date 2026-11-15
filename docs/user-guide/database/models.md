@@ -1,10 +1,14 @@
-# Database Models
+<a id="database-models"></a>
 
-This page covers how SQLAlchemy 2.0 models are organized in the boilerplate, the patterns used for relationships and timestamps, and how to add a new model.
+# 数据库模型
 
-## Where Models Live
+本页介绍模板如何组织 SQLAlchemy 2.0 模型，关联关系和时间戳的使用模式，以及添加新模型的方式。
 
-Models live in **`backend/src/modules/<feature>/models.py`** — colocated with that feature's schemas, CRUD, service, and routes:
+<a id="where-models-live"></a>
+
+## 模型位置
+
+模型位于 **`backend/src/modules/<feature>/models.py`**，与对应功能的 Schema、CRUD、服务和路由放在一起：
 
 ```text
 backend/src/modules/
@@ -15,7 +19,7 @@ backend/src/modules/
 └── api_keys/models.py      # APIKey, KeyUsage
 ```
 
-The shared base class and reusable mixins live in `backend/src/infrastructure/database/`:
+共享基类和可复用 mixin 位于 `backend/src/infrastructure/database/`：
 
 ```text
 backend/src/infrastructure/database/
@@ -23,9 +27,11 @@ backend/src/infrastructure/database/
 └── models.py               # TimestampMixin, SoftDeleteMixin, UUIDMixin
 ```
 
-## The Base Class
+<a id="the-base-class"></a>
 
-All models inherit from `Base` defined in `infrastructure/database/session.py`:
+## 基类
+
+所有模型继承 `infrastructure/database/session.py` 定义的 `Base`：
 
 ```python
 from sqlalchemy.orm import DeclarativeBase, MappedAsDataclass
@@ -36,11 +42,13 @@ class Base(DeclarativeBase, MappedAsDataclass):
     pass
 ```
 
-Combining `DeclarativeBase` with `MappedAsDataclass` means each model behaves like a Python dataclass: you instantiate it with `User(name=..., username=..., ...)` and only the columns you mark `init=False` are excluded from the constructor.
+`DeclarativeBase` 与 `MappedAsDataclass` 组合后，模型像 Python dataclass 一样工作，可以通过 `User(name=..., username=..., ...)` 实例化。只有显式标记 `init=False` 的列不出现在构造函数中。
 
-## Reusable Mixins
+<a id="reusable-mixins"></a>
 
-The boilerplate ships three mixins in `infrastructure/database/models.py`. Compose them onto your model:
+## 可复用 mixin
+
+`infrastructure/database/models.py` 提供三个 mixin，可组合到模型上：
 
 ```python
 from ...infrastructure.database.models import (
@@ -53,16 +61,17 @@ class MyModel(Base, TimestampMixin, SoftDeleteMixin):
     ...
 ```
 
-| Mixin | Adds | Notes |
-|-------|------|-------|
-| `TimestampMixin` | `created_at`, `updated_at` (timezone-aware UTC) | Both `init=False`; defaults via `datetime.now(UTC)` |
-| `SoftDeleteMixin` | `is_deleted` (bool), `deleted_at` (datetime?) | FastCRUD's `.delete()` flips these instead of issuing `DELETE FROM` |
-| `UUIDMixin` | `uuid` primary key with `gen_random_uuid()` server fallback | Use this when you need an external-facing identifier |
+| Mixin | 添加的内容 | 说明 |
+|-------|------------|------|
+| `TimestampMixin` | 带 UTC 时区的 `created_at`、`updated_at` | 均为 `init=False`，通过 `datetime.now(UTC)` 提供默认值 |
+| `SoftDeleteMixin` | `is_deleted` 布尔值、可空 `deleted_at` 时间 | FastCRUD 的 `.delete()` 修改字段，不执行 `DELETE FROM` |
+| `UUIDMixin` | `uuid` 主键，以服务端 `gen_random_uuid()` 兜底 | 适用于对外标识 |
 
-## Auto-Discovery for Alembic
+<a id="auto-discovery-for-alembic"></a>
 
-Nothing lists the models by hand. `src/modules/__init__.py` imports nothing at all, and the two
-walkers find whatever is on disk:
+## Alembic 自动发现
+
+无需手动维护模型列表。`src/modules/__init__.py` 不导入任何内容，两个遍历器从磁盘发现模块：
 
 ```python
 # backend/src/infrastructure/database/registry.py
@@ -72,18 +81,17 @@ def import_models(package_name: str = MODELS_PACKAGE) -> None:
         importlib.import_module(module_name)
 ```
 
-`import_models()` registers every model on `Base.metadata`, which is what Alembic's
-`--autogenerate` and `scripts/create_tables.py` read. `discover_permissions()`, in
-`infrastructure/permissions.py`, walks the same packages for each module's `permissions.py` — see
-[Permissions](../authentication/permissions.md#role-based-permissions).
+`import_models()` 将模型注册到 `Base.metadata`，供 Alembic 的 `--autogenerate` 和 `scripts/create_tables.py` 使用。`infrastructure/permissions.py` 中的 `discover_permissions()` 遍历相同包中的 `permissions.py`，见[权限](../authentication/permissions.md#role-based-permissions)。
 
-A module you add is found by both as soon as its files exist; there is no registry to edit.
+新增模块文件存在后，两者即可发现，无需修改注册表。
 
-## Relationships
+<a id="relationships"></a>
 
-The boilerplate uses SQLAlchemy `relationship()` where it makes sense. Relationships that are routinely read (like `User.tier`) use `lazy="selectin"` to avoid N+1 problems by fetching related rows in a single follow-up query. Large collections that are rarely read (like `Tier.users`) use `lazy="select"`, so loading a tier doesn't pull in every user assigned to it.
+## 关联关系
 
-For example, `User.tier` and `Tier.users` are both wired up:
+模板按需使用 SQLAlchemy `relationship()`。经常读取的关联（如 `User.tier`）使用 `lazy="selectin"`，通过一次后续查询获取关联行，避免 N+1。很少读取的大集合（如 `Tier.users`）使用 `lazy="select"`，避免加载等级时带出所有用户。
+
+例如 `User.tier` 和 `Tier.users` 的双向配置：
 
 ```python
 # modules/user/models.py
@@ -107,9 +115,11 @@ class Tier(Base, TimestampMixin, SoftDeleteMixin):
     )
 ```
 
-### Avoiding Circular Imports
+<a id="avoiding-circular-imports"></a>
 
-Both sides of a relationship import each other's model class. Use `TYPE_CHECKING` for the import and a string-literal class name in `relationship(...)`:
+### 避免循环导入
+
+关联两端需要对方模型类型。用 `TYPE_CHECKING` 包裹导入，并在 `relationship(...)` 中使用字符串类名：
 
 ```python
 from typing import TYPE_CHECKING
@@ -122,9 +132,11 @@ class User(Base, ...):
     tier: Mapped["Tier | None"] = relationship("Tier", back_populates="users", ...)
 ```
 
-### When to Skip Relationships
+<a id="when-to-skip-relationships"></a>
 
-If a foreign key only points "outward" (no need to traverse from the other side), just keep the FK column and skip the relationship:
+### 何时省略关联关系
+
+外键只向外引用且无需反向遍历时，可只保留外键列：
 
 ```python
 class APIKey(Base, ...):
@@ -133,11 +145,13 @@ class APIKey(Base, ...):
     # users don't need a list of all their keys at the ORM level.
 ```
 
-You can always join via FastCRUD when you need the related data.
+需要关联数据时，仍可通过 FastCRUD 连接查询。
 
-## The User Model
+<a id="the-user-model"></a>
 
-`modules/user/models.py` is the most feature-rich example. Trimmed view:
+## 用户模型
+
+`modules/user/models.py` 是最完整的示例，以下为节选：
 
 ```python
 from datetime import datetime
@@ -190,16 +204,18 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
         return not self.is_deleted
 ```
 
-Key points:
+要点：
 
-- `init=False` excludes the field from the dataclass `__init__` (used for the primary key and timestamps you don't want callers to set).
-- `index=True` adds a database index on lookup-heavy columns (`username`, `email`, `tier_id`, OAuth IDs).
-- `unique=True` enforces uniqueness at the DB level.
-- `is_active` is a **derived property**, not a column — it returns `not is_deleted`. The `crudauth` auth library reads it during login so soft-deleted users can't authenticate, while `is_deleted` stays the single source of truth.
+- `init=False` 从 dataclass 的 `__init__` 排除字段，适用于不希望调用者指定的主键和时间戳。
+- `index=True` 为频繁查询的列添加数据库索引，如 `username`、`email`、`tier_id` 和 OAuth ID。
+- `unique=True` 在数据库层保证唯一性。
+- `is_active` 是**派生属性**而非列，返回 `not is_deleted`。`crudauth` 登录时读取它，使软删除用户无法认证，同时由 `is_deleted` 作为唯一状态来源。
 
-## The RateLimit Model
+<a id="the-ratelimit-model"></a>
 
-`modules/rate_limit/models.py` shows a no-relationship model with a foreign key:
+## RateLimit 模型
+
+`modules/rate_limit/models.py` 展示只有外键、没有关联关系的模型：
 
 ```python
 from sqlalchemy import ForeignKey, Index, Integer, String, text
@@ -233,12 +249,13 @@ class RateLimit(Base, TimestampMixin, SoftDeleteMixin):
     )
 ```
 
-Each rate limit row says: "for tier X, requests to `path` are capped at `limit` per `period` seconds."
-The index is partial, so the one rule per tier and path is the one a soft delete has not taken out.
+每行表示：等级 X 对 `path` 的请求，每 `period` 秒最多 `limit` 次。索引是部分索引，仅约束未软删除的规则。
 
-## Soft Deletion
+<a id="soft-deletion"></a>
 
-The `SoftDeleteMixin` adds `is_deleted` and `deleted_at`. FastCRUD's `.delete()` flips them instead of removing the row:
+## 软删除
+
+`SoftDeleteMixin` 添加 `is_deleted` 和 `deleted_at`。FastCRUD 的 `.delete()` 修改它们，而非删除记录：
 
 ```python
 # Soft delete (default for models with the mixin)
@@ -251,18 +268,26 @@ await crud_users.db_delete(db=db, id=user_id)
 await crud_users.get_multi(db=db, is_deleted=False)
 ```
 
-## Adding a New Model
+<a id="adding-a-new-model"></a>
 
-### Step-by-step
+## 添加新模型
 
-1. **Create the module folder** (if it doesn't exist): `mkdir -p backend/src/modules/widgets`
-2. **Define the model** in `modules/widgets/models.py`
-3. **Register it** in `modules/__init__.py` so Alembic sees it
-4. **Generate a migration**: `cd backend && uv run --no-sync alembic revision --autogenerate -m "add widgets"`
-5. **Review the migration** in `migrations/versions/...` (autogenerate isn't always perfect)
-6. **Apply**: `uv run --no-sync alembic upgrade head`
+<a id="step-by-step"></a>
 
-### Example: a `Widget` model
+### 步骤
+
+1. **创建模块目录**（尚不存在时）：`mkdir -p backend/src/modules/widgets`。
+2. **定义模型**：在 `modules/widgets/models.py` 中编写。
+3. **注册模型**：原文此处要求在 `modules/__init__.py` 注册，让 Alembic 识别。
+4. **生成迁移**：`cd backend && uv run --no-sync alembic revision --autogenerate -m "add widgets"`。
+5. **审查迁移**：查看 `migrations/versions/...`，自动生成并非总是正确。
+6. **应用迁移**：`uv run --no-sync alembic upgrade head`。
+
+> 译注：步骤 3 与上文自动发现的说明不一致，使用时请核对当前代码。
+
+<a id="example-a-widget-model"></a>
+
+### 示例：`Widget` 模型
 
 ```python
 # backend/src/modules/widgets/models.py
@@ -285,7 +310,7 @@ class Widget(Base, TimestampMixin, SoftDeleteMixin):
     owner_id: Mapped[int] = mapped_column(ForeignKey("user.id"), index=True)
 ```
 
-Then add to `backend/src/modules/__init__.py`:
+然后添加到 `backend/src/modules/__init__.py`：
 
 ```python
 from .widgets.models import Widget
@@ -296,9 +321,13 @@ __all__ = [
 ]
 ```
 
-## Common Patterns
+<a id="common-patterns"></a>
 
-### Database-Level Constraints
+## 常见模式
+
+<a id="database-level-constraints"></a>
+
+### 数据库级约束
 
 ```python
 from sqlalchemy import CheckConstraint, Index, UniqueConstraint
@@ -321,9 +350,11 @@ class Product(Base, TimestampMixin):
     )
 ```
 
-### Enum Fields
+<a id="enum-fields"></a>
 
-The boilerplate prefers `StrEnum` (used in `OAuthProvider`, `EnvironmentOption`, etc.):
+### 枚举字段
+
+模板偏好 `StrEnum`，如 `OAuthProvider`、`EnvironmentOption`：
 
 ```python
 from enum import StrEnum
@@ -343,9 +374,11 @@ class Widget(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default=WidgetStatus.ACTIVE.value)
 ```
 
-Storing the value as a `String` keeps migrations simple. If you prefer SQLAlchemy's `SQLEnum` with a real Postgres enum type, that's also fine — just be aware that adding values requires a migration.
+以 `String` 存储可简化迁移。也可以用 SQLAlchemy 的 `SQLEnum` 和真实 Postgres 枚举类型，但新增枚举值需要迁移。
 
-### JSON Fields
+<a id="json-fields"></a>
+
+### JSON 字段
 
 ```python
 from sqlalchemy.dialects.postgresql import JSONB
@@ -359,26 +392,34 @@ class UserProfile(Base, TimestampMixin):
     preferences: Mapped[dict] = mapped_column(JSONB, default_factory=dict, init=False)
 ```
 
-## Migration Considerations
+<a id="migration-considerations"></a>
 
-### Backwards-compatible changes (safe)
+## 迁移注意事项
 
-- Adding nullable columns
-- Adding new tables
-- Adding indexes
-- Increasing string column lengths
+<a id="backwards-compatible-changes-safe"></a>
 
-### Breaking changes (need care)
+### 向后兼容的变更
 
-- Making columns non-nullable (need a default or backfill plan)
-- Removing columns (drop after deploy is stable)
-- Changing column types (often two-step: add new, migrate data, drop old)
-- Removing tables
+- 添加可空列。
+- 添加新表。
+- 添加索引。
+- 增加字符串列长度。
 
-See [Migrations](migrations.md) for the full workflow.
+<a id="breaking-changes-need-care"></a>
 
-## Next Steps
+### 需要谨慎处理的破坏性变更
 
-1. **[Schemas](schemas.md)** - Pydantic request/response shapes
-2. **[CRUD Operations](crud.md)** - FastCRUD usage patterns
-3. **[Migrations](migrations.md)** - Alembic workflow
+- 改为非空列，需要默认值或回填方案。
+- 删除列，应在部署稳定后进行。
+- 改变列类型，通常分为新增列、迁移数据、删除旧列。
+- 删除表。
+
+完整流程见[迁移](migrations.md)。
+
+<a id="next-steps"></a>
+
+## 后续步骤
+
+1. **[Schema](schemas.md)**：Pydantic 请求与响应结构。
+2. **[CRUD 操作](crud.md)**：FastCRUD 使用模式。
+3. **[迁移](migrations.md)**：Alembic 工作流。

@@ -1,8 +1,12 @@
-# Client Cache
+<a id="client-cache"></a>
 
-Client-side caching uses HTTP `Cache-Control` headers to tell browsers (and intermediate CDNs / proxies) when they're allowed to reuse a response without coming back to the server. The boilerplate ships a small middleware that sets sensible defaults — an explicit "don't cache" for the API, and a configurable `max-age` for everything else.
+# 客户端缓存
 
-## What's Built In
+客户端通过 HTTP `Cache-Control` 告诉浏览器、CDN 和代理何时可复用响应而不访问服务器。模板提供小型中间件：API 明确不缓存，其他响应使用受控策略及可配置 max-age。
+
+<a id="whats-built-in"></a>
+
+## 内置能力
 
 ```text
 infrastructure/middleware.py        ClientCacheMiddleware
@@ -10,9 +14,11 @@ infrastructure/app_factory.py       Wires it into the app at startup
 infrastructure/config/settings.py   CLIENT_CACHE_ENABLED, CLIENT_CACHE_MAX_AGE
 ```
 
-That's the entire surface area. There's no per-route configuration, no path table, no ETag handling out of the box. The middleware is intentionally tiny — anything more nuanced you handle in your route handlers.
+没有逐路由配置表或内置 ETag，更细致的逻辑由路由处理。
 
-## How It Works
+<a id="how-it-works"></a>
+
+## 工作方式
 
 ```python
 # infrastructure/middleware.py
@@ -41,22 +47,24 @@ class ClientCacheMiddleware(BaseHTTPMiddleware):
         return response
 ```
 
-Four rules:
+四条规则：
 
-| Path                                       | `Cache-Control` value                          |
-|--------------------------------------------|------------------------------------------------|
-| The route set the header itself            | whatever the route set                         |
-| Under `API_PREFIX` (`/api` by default)     | `private, no-cache, no-store, must-revalidate` |
-| Under a public prefix (`/admin/statics/`)  | `public, max-age={CLIENT_CACHE_MAX_AGE}`       |
-| Anything else                              | `private, no-store`                            |
+| 情况 | `Cache-Control` |
+|------|-----------------|
+| 路由已设置响应头 | 保留路由值 |
+| `API_PREFIX` 下，默认 `/api` | `private, no-cache, no-store, must-revalidate` |
+| 公开前缀，如 `/admin/statics/` | `public, max-age={CLIENT_CACHE_MAX_AGE}` |
+| 其余 | `private, no-store` |
 
-The reasoning:
+理由：
 
-- **The API** is dynamic, often authenticated, and frequently personalized. Caching at the browser or CDN would leak data between users and serve stale state. Default is hard "don't cache." The prefix comes from `API_PREFIX`, so moving the API moves this rule with it.
-- **Public prefixes** are the paths whose bytes are the same for every caller — by default where SQLAdmin serves its own CSS and JS. Pass your own `public_prefixes` to add an application's static mount.
-- **Everything else** — the admin pages, the docs, the health endpoints — answers with per-caller data or state, so a shared cache must not keep it. A route that knows its response is cacheable sets the header itself and is left alone.
+- **API** 常动态、需认证且个性化，浏览器或 CDN 缓存可能造成泄露或陈旧。规则跟随 `API_PREFIX`。
+- **公开前缀** 对所有人字节一致，默认 SQLAdmin CSS / JS，可通过 `public_prefixes` 添加应用静态挂载。
+- **其余**，如后台页面、文档、健康状态，可能因用户或状态变化，不应共享缓存。确定可缓存的路由自行设头。
 
-## Configuration
+<a id="configuration"></a>
+
+## 配置
 
 ```env
 # Enables the middleware. Set to false to skip the Cache-Control header entirely.
@@ -66,13 +74,13 @@ CLIENT_CACHE_ENABLED=true
 CLIENT_CACHE_MAX_AGE=60
 ```
 
-The middleware is added when `CLIENT_CACHE_ENABLED` is true (`infrastructure/app_factory.py`). It has nothing to do with `CACHE_ENABLED`, which governs the server-side cache: either can be on without the other.
+`CLIENT_CACHE_ENABLED=true` 时由 `infrastructure/app_factory.py` 添加，与服务端 `CACHE_ENABLED` 独立。关闭后中间件不设头，改由路由或代理负责。
 
-When `CLIENT_CACHE_ENABLED=false`, no `Cache-Control` header is set by middleware — your routes (or your reverse proxy) are responsible for it.
+<a id="overriding-for-a-specific-endpoint"></a>
 
-## Overriding for a Specific Endpoint
+## 覆盖特定接口
 
-If you want a particular API endpoint to opt **into** browser caching, set the header in the handler. Middleware runs after the handler, so a header set in the route is overwritten — meaning you have to either set it via `Response` directly (and let the middleware overwrite anyway) **or** use a small route-level middleware. The simplest reliable pattern is to disable the global middleware in tests/docs and set headers explicitly in your routes:
+本节原文称中间件在处理器后覆盖 API 的缓存头，建议关闭全局中间件后逐路由设头，或使用路由级中间件：
 
 ```python
 from fastapi import APIRouter, Response
@@ -86,34 +94,33 @@ async def manifest(response: Response) -> dict[str, str]:
     return {"name": "My App", "version": "1.0.0"}
 ```
 
-Heads up: because the global middleware overwrites `Cache-Control` for `/api/*` paths, the snippet above only takes effect on **non-API** routes. For API routes you actually want to cache, either:
+原文说明该示例只对非 API 路由生效，API 需移出 `/api/` 或关闭 `CLIENT_CACHE_ENABLED` 自行管理。一般 CRUD API 优先采用[服务端缓存](redis-cache.md)，浏览器仍读取新响应。
 
-1. Mount them outside `/api/` (rare), or
-2. Disable `CLIENT_CACHE_ENABLED` and set headers on a per-route basis.
+> 译注：本节“覆盖已有头”的说法与上方规则表“保留路由值”不一致，请按实际代码核对。
 
-In practice, almost no endpoint in a typical app benefits from browser caching of an API response — keep API caching server-side via the [`@cache` decorator](redis-cache.md) and let the browser fetch fresh.
+<a id="a-quick-cache-control-primer"></a>
 
-## A Quick Cache-Control Primer
+## Cache-Control 简介
 
-The directives the middleware uses (and the ones you'll most often add manually):
+| 指令 | 含义 |
+|------|------|
+| `public` | 浏览器、CDN、代理均可存储 |
+| `private` | 仅终端浏览器可存储，共享缓存不可 |
+| `no-cache` | 可存储，但复用前需向服务器验证 |
+| `no-store` | 不存储到浏览器、磁盘或 CDN |
+| `must-revalidate` | 过期后必须向上游验证再使用 |
+| `max-age=<seconds>` | 有效秒数 |
+| `s-maxage=<seconds>` | 仅共享缓存有效秒数 |
+| `immutable` | 内容不会变化，客户端可跳过验证 |
+| `stale-while-revalidate=<s>` | 过期后在指定时间内可返回旧副本并后台更新 |
 
-| Directive               | Meaning                                                                         |
-|-------------------------|---------------------------------------------------------------------------------|
-| `public`                | Any cache (browser, CDN, proxy) may store the response                          |
-| `private`               | Only the end-user's browser may store it. CDNs / shared proxies must not        |
-| `no-cache`              | Caches may store, but must revalidate with the server before reuse              |
-| `no-store`              | Don't store at all — not in the browser, not on disk, not in a CDN              |
-| `must-revalidate`       | Once stale, the cache must check upstream before serving again                  |
-| `max-age=<seconds>`     | Cache is fresh for this many seconds                                            |
-| `s-maxage=<seconds>`    | Same as `max-age`, but applies only to shared caches (CDNs)                     |
-| `immutable`             | The body will never change — clients can skip revalidation entirely             |
-| `stale-while-revalidate=<s>` | After freshness expires, serve the stale copy for this long while updating |
+API 的多项禁止缓存指令有意采用保守默认值，适用于认证后的动态数据。
 
-The pre-API value (`private, no-cache, no-store, must-revalidate`) is paranoid on purpose: in combination, those directives forbid every form of caching the major browsers and CDNs implement. That's the right default for authenticated dynamic data.
+<a id="when-to-reach-for-etags"></a>
 
-## When to Reach for ETags
+## 何时使用 ETag
 
-The middleware doesn't generate ETags or `Last-Modified` headers. If you want conditional requests (`304 Not Modified` on unchanged resources), you have to set those headers in the handler:
+中间件不生成 ETag 或 `Last-Modified`。需要未变化返回 `304 Not Modified` 时自行设置：
 
 ```python
 import hashlib
@@ -136,40 +143,38 @@ async def manifest(request: Request, response: Response) -> dict[str, str] | Res
     return payload
 ```
 
-ETags are most useful for:
+适合大型较静态内容、清单、配置、生成 PDF、读多写少公开接口，以及跨多次请求稳定的计算结果。普通 CRUD 通常不值得额外复杂度，服务端 `@cache` 和静态资源短 max-age 已覆盖多数场景。
 
-- Larger static-ish payloads (manifests, configs, generated PDFs)
-- Public endpoints with high read volume but low write volume
-- Anything where the body is computed but stable across many requests
+<a id="reverse-proxy-cdn-considerations"></a>
+<a id="reverse-proxy--cdn-considerations"></a>
 
-For typical CRUD endpoints they're rarely worth the complexity — `@cache` server-side plus a short `max-age` for genuinely static assets covers most cases.
+## 反向代理与 CDN
 
-## Reverse Proxy / CDN Considerations
+Nginx、Caddy、CloudFront、Cloudflare 会读取缓存头：API 禁止边缘缓存，每次到源站。本节原文称非 API 响应可共享缓存 `CLIENT_CACHE_MAX_AGE` 秒。
 
-If you serve the app behind a reverse proxy or CDN (Nginx, Caddy, CloudFront, Cloudflare), the proxy will see and obey the middleware's `Cache-Control` headers:
+> 译注：上方规则表仅对公开前缀允许共享缓存，其余非 API 响应仍为 `private, no-store`。
 
-- `/api/*` responses won't be cached at the edge — every request reaches the origin
-- Non-API responses are eligible for shared caching for `CLIENT_CACHE_MAX_AGE` seconds
+需要 CDN 长 TTL、浏览器短 TTL 时，处理器同时设 `s-maxage` 和 `max-age`，或在代理移除并替换缓存头。
 
-If you need different behavior at the edge (longer CDN TTL but short browser TTL, for example), set both `s-maxage` and `max-age` from your handlers, or strip the middleware's header at the proxy and replace it.
+<a id="disabling-the-middleware"></a>
 
-## Disabling the Middleware
+## 禁用中间件
 
 ```env
 CLIENT_CACHE_ENABLED=false
 ```
 
-After restart, no `Cache-Control` header is set by the boilerplate. Your routes and proxy take full control. This is the right move when:
+重启后模板不再设置该头，由路由和代理完全管理。适用于已有 CDN 策略、逐路由策略，或排查缓存问题建立基线。
 
-- You have a reverse proxy / CDN already managing cache headers
-- You're doing per-route caching strategies that would be undone by the middleware
-- You're debugging a caching-related bug and want a clean baseline
+<a id="troubleshooting"></a>
 
-## Troubleshooting
+## 故障排查
 
-### "My API response is still being cached by the browser"
+<a id="my-api-response-is-still-being-cached-by-the-browser"></a>
 
-Confirm the response actually carries the no-cache header:
+### API 仍被浏览器缓存
+
+确认响应头：
 
 ```bash
 curl -I http://localhost:8000/api/v1/users/me \
@@ -177,30 +182,34 @@ curl -I http://localhost:8000/api/v1/users/me \
 # look for: Cache-Control: private, no-cache, no-store, must-revalidate
 ```
 
-If the header is missing, check that `CLIENT_CACHE_ENABLED=true` — that setting alone decides whether the middleware is mounted.
+缺失时检查 `CLIENT_CACHE_ENABLED=true`，它决定是否挂载。
 
-### "I want to cache an API response but the middleware overrides it"
+<a id="i-want-to-cache-an-api-response-but-the-middleware-overrides-it"></a>
 
-The middleware overwrites `Cache-Control` for any `/api/*` path. Options:
+### 中间件覆盖 API 的缓存头
 
-- Cache server-side with the [`@cache` decorator](redis-cache.md) — almost always what you actually want
-- Set `CLIENT_CACHE_ENABLED=false` and manage `Cache-Control` per-route
-- Route the endpoint outside `/api/*` if it really is a static asset
+本节沿用上文的旧描述，建议服务端缓存、关闭客户端中间件后逐路由管理，或将真正静态资源移出 `/api/*`。与规则表的差异见译注。
 
-### "Static assets aren't being cached aggressively enough"
+<a id="static-assets-arent-being-cached-aggressively-enough"></a>
 
-Raise `CLIENT_CACHE_MAX_AGE`, or set per-asset headers in the handler / proxy. Browsers will use whichever value the server returns most recently, so updating the env var and redeploying takes effect for new requests immediately.
+### 静态资源缓存不够久
 
-## Key Files
+提高 `CLIENT_CACHE_MAX_AGE`，或在处理器、代理设置资源专属头。修改部署后新请求读取最新值。
 
-| Component             | Location                                              |
-|-----------------------|-------------------------------------------------------|
-| Middleware            | `backend/src/infrastructure/middleware.py`            |
-| Wiring                | `backend/src/infrastructure/app_factory.py`           |
-| Settings              | `backend/src/infrastructure/config/settings.py` (`CacheSettings`) |
+<a id="key-files"></a>
 
-## Next Steps
+## 关键文件
 
-- **[Redis Cache](redis-cache.md)** — Server-side caching with the `@cache` decorator
-- **[Cache Strategies](cache-strategies.md)** — Patterns for keys, related-key invalidation, cache-aside flows
-- **[Environment Variables](../configuration/environment-variables.md#cache)** — Full settings reference
+| 组件 | 位置 |
+|------|------|
+| 中间件 | `backend/src/infrastructure/middleware.py` |
+| 组装 | `backend/src/infrastructure/app_factory.py` |
+| 配置 | `backend/src/infrastructure/config/settings.py` 的 `CacheSettings` |
+
+<a id="next-steps"></a>
+
+## 后续步骤
+
+- **[Redis 缓存](redis-cache.md)**：服务端装饰器。
+- **[缓存策略](cache-strategies.md)**：键名与失效。
+- **[环境变量](../configuration/environment-variables.md#cache)**：完整配置。

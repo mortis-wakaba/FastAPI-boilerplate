@@ -1,10 +1,14 @@
-# Database Schemas
+<a id="database-schemas"></a>
 
-Pydantic schemas handle three things in this codebase: **input validation**, **output serialization**, and **API contracts** that frontend and backend can rely on. Schemas are separate from the SQLAlchemy models — keeping the two layers split lets you control exactly what each endpoint accepts and returns.
+# 数据 Schema
 
-## Where Schemas Live
+Pydantic Schema 在本项目中承担三项职责：**输入校验**、**输出序列化**以及前后端共同依赖的 **API 契约**。Schema 与 SQLAlchemy 模型分离，以精确控制每个接口接受和返回的内容。
 
-Each module owns its schemas, colocated with the model and CRUD:
+<a id="where-schemas-live"></a>
+
+## Schema 位置
+
+每个模块拥有自己的 Schema，与模型和 CRUD 放在一起：
 
 ```text
 backend/src/modules/
@@ -14,11 +18,13 @@ backend/src/modules/
 └── api_keys/schemas.py        # APIKeyCreate, APIKeyRead, APIKeyUpdate, KeyUsageRead
 ```
 
-Cross-module shared schemas (timestamp/soft-delete mixins, common error shapes) live in `backend/src/modules/common/schemas.py`.
+跨模块共享的 Schema，如时间戳、软删除 mixin 和通用错误结构，位于 `backend/src/modules/common/schemas.py`。
 
-## Common Mixin Schemas
+<a id="common-mixin-schemas"></a>
 
-`modules/common/schemas.py` provides two reusable Pydantic mixins matching the SQLAlchemy mixins:
+## 通用 mixin Schema
+
+`modules/common/schemas.py` 提供两个可复用的 Pydantic mixin，与 SQLAlchemy mixin 对应：
 
 ```python
 # modules/common/schemas.py
@@ -33,11 +39,13 @@ class PersistentDeletion(BaseModel):
     is_deleted: bool = False
 ```
 
-Compose them onto your full-record schema where applicable.
+按需将其组合到完整记录 Schema 中。
 
-## The User Schemas
+<a id="the-user-schemas"></a>
 
-`modules/user/schemas.py` is the most extensive example. The pattern is **one schema per role** — each operation gets its own shape:
+## 用户 Schema
+
+`modules/user/schemas.py` 是最完整的示例。采用**每种用途一个 Schema**的模式，每个操作有独立结构：
 
 ```python
 from datetime import datetime
@@ -172,64 +180,83 @@ class UserAnonymize(BaseModel):
     # ...other PII-clearing fields...
 ```
 
-### Naming Conventions
+<a id="naming-conventions"></a>
 
-The schemas follow a consistent vocabulary across modules:
+### 命名约定
 
-| Suffix | Use |
-|--------|-----|
-| `Base` | Common fields shared across create/update/full schemas |
-| *(none — class name = `User`)* | Full-record schema (every column, mostly internal) |
-| `Read` | API response — drops sensitive/internal fields, and the input rules: it describes what a row holds, so one written by an older version still reads |
-| `Create` | API request body for POST |
-| `CreateInternal` | What the service stores (raw password → hashed_password) |
-| `Update` | Partial update body for PATCH (all fields optional) |
-| `AdminUpdate` | Update body extended with the fields only an administrator may set |
-| `UpdateInternal` | What the service stores on update (e.g. with stamped `updated_at`) |
-| `TierUpdate`, `Anonymize`, `Delete`, … | Operation-specific narrow schemas |
+各模块使用一致的命名：
 
-### Why Internal vs External
+| 后缀 | 用途 |
+|------|------|
+| `Base` | 创建、更新和完整 Schema 共用的字段 |
+| 无后缀，如 `User` | 完整记录，包含所有列，主要内部使用 |
+| `Read` | API 响应，移除敏感、内部字段和输入限制；描述已存储记录，因此旧版本写入的数据仍可读取 |
+| `Create` | POST 请求体 |
+| `CreateInternal` | 服务实际存储的内容，如原始密码转换为 hashed_password |
+| `Update` | PATCH 部分更新请求体，所有字段可选 |
+| `AdminUpdate` | 扩展更新体，包含只有管理员可以设置的字段 |
+| `UpdateInternal` | 服务更新时写入的内容，如自动设置的 `updated_at` |
+| `TierUpdate`、`Anonymize`、`Delete` 等 | 特定操作使用的窄范围 Schema |
 
-The split between `Create` and `CreateInternal` (and likewise for updates) keeps the API surface honest:
+<a id="why-internal-vs-external"></a>
 
-- `UserCreate` accepts `password: str` from the client.
-- The service hashes the password and constructs a `UserCreateInternal` with `hashed_password` instead.
-- `crud_users.create(db=db, object=user_internal)` is what actually hits the database.
+### 为何区分内部和外部
 
-The client can never set `hashed_password` directly, and the model never sees a plaintext password.
+`Create` 与 `CreateInternal` 的区分，以及更新 Schema 的对应区分，使 API 边界清晰：
 
-## Field Validation
+- `UserCreate` 接受客户端的 `password: str`。
+- 服务计算密码哈希，构造包含 `hashed_password` 的 `UserCreateInternal`。
+- 最终由 `crud_users.create(db=db, object=user_internal)` 写入数据库。
+
+客户端无法直接指定 `hashed_password`，模型也不会接触明文密码。
+
+<a id="field-validation"></a>
+
+## 字段校验
+
+<a id="annotated-field"></a>
+<a id="annotated--field"></a>
 
 ### `Annotated` + `Field`
 
-The codebase uses `Annotated[T, Field(...)]` for validation rules:
+代码使用 `Annotated[T, Field(...)]` 定义规则：
 
-| `Field` parameter | Effect |
-|-------------------|--------|
-| `min_length` / `max_length` | String length bounds |
-| `pattern` | Regex validation (e.g. `r"^[a-z0-9]+$"` for usernames) |
-| `gt` / `ge` / `lt` / `le` | Numeric bounds |
-| `default` | Default value |
-| `examples` | OpenAPI example values shown in `/docs` |
-| `description` | Doc string visible in OpenAPI |
+| `Field` 参数 | 效果 |
+|--------------|------|
+| `min_length` / `max_length` | 字符串长度上下限 |
+| `pattern` | 正则校验，例如用户名使用 `r"^[a-z0-9]+$"` |
+| `gt` / `ge` / `lt` / `le` | 数值上下限 |
+| `default` | 默认值 |
+| `examples` | `/docs` 中展示的 OpenAPI 示例 |
+| `description` | OpenAPI 中可见的字段说明 |
+
+<a id="emailstr"></a>
 
 ### `EmailStr`
 
-Pydantic's `EmailStr` validates the email format and normalizes the casing.
+Pydantic 的 `EmailStr` 校验邮箱格式，并规范化大小写。
+
+<a id="configdictextraforbid"></a>
 
 ### `ConfigDict(extra="forbid")`
 
-Set on `UserCreate`, `UserUpdate`, etc. — anything the client sends beyond the declared fields raises a 422. This matters most for create/update payloads where stray fields could otherwise sneak through.
+用于 `UserCreate`、`UserUpdate` 等模型。客户端提交声明之外的字段会返回 422，对创建和更新请求尤其重要，避免额外字段混入。
+
+<a id="from_attributes"></a>
 
 ### `from_attributes`
 
-Use `ConfigDict(from_attributes=True)` when you need to build a Pydantic schema from a SQLAlchemy model instance directly. The boilerplate's services mostly work with dicts (FastCRUD's default return shape), so this is rarely needed — but it's the right setting if you do `UserRead.model_validate(orm_user)`.
+需要直接从 SQLAlchemy 模型实例构建 Pydantic Schema 时，使用 `ConfigDict(from_attributes=True)`。模板服务主要使用 FastCRUD 默认返回的字典，因此通常不需要；使用 `UserRead.model_validate(orm_user)` 时则应设置。
 
-## Schema Patterns
+<a id="schema-patterns"></a>
 
-### Optional Fields in Updates
+## Schema 模式
 
-The convention is **all fields optional** in `*Update` schemas:
+<a id="optional-fields-in-updates"></a>
+
+### 更新中的可选字段
+
+`*Update` Schema 约定**全部字段可选**：
 
 ```python
 class UserUpdate(BaseModel):
@@ -240,11 +267,13 @@ class UserUpdate(BaseModel):
     # ...
 ```
 
-The service then writes only the fields the client actually provided.
+服务只写入客户端实际提供的字段。
 
-### Custom Validators
+<a id="custom-validators"></a>
 
-For cross-field rules or transforms:
+### 自定义校验器
+
+跨字段规则或转换：
 
 ```python
 from pydantic import field_validator, model_validator
@@ -269,11 +298,13 @@ class WidgetCreate(BaseModel):
         return self
 ```
 
-`field_validator` validates one field; `model_validator(mode="after")` runs after all fields are set and can validate combinations.
+`field_validator` 校验单个字段；`model_validator(mode="after")` 在所有字段设置后运行，可校验字段组合。
 
-### Computed Fields
+<a id="computed-fields"></a>
 
-For values derived at serialization time (not stored):
+### 计算字段
+
+用于序列化时派生、不存储的值：
 
 ```python
 from pydantic import computed_field
@@ -293,9 +324,11 @@ class UserReadWithStats(UserRead):
         return (datetime.now(UTC) - self.created_at).days
 ```
 
-## Multi-Record Responses
+<a id="multi-record-responses"></a>
 
-The boilerplate uses **FastCRUD's `PaginatedListResponse`** for paginated list endpoints:
+## 多记录响应
+
+分页列表接口使用 **FastCRUD 的 `PaginatedListResponse`**：
 
 ```python
 from fastcrud import PaginatedListResponse, compute_offset, paginated_response
@@ -316,7 +349,7 @@ async def get_users(
     return paginated_response(crud_data=result, page=page, items_per_page=items_per_page)
 ```
 
-The response shape:
+响应结构：
 
 ```json
 {
@@ -328,7 +361,7 @@ The response shape:
 }
 ```
 
-For single-record endpoints, return the schema directly:
+单记录接口直接返回 Schema：
 
 ```python
 @router.get("/me", response_model=UserRead)
@@ -336,12 +369,14 @@ async def me(current_user: Annotated[dict[str, Any], Depends(get_current_user)])
     return current_user
 ```
 
-## Adding Schemas for a New Module
+<a id="adding-schemas-for-a-new-module"></a>
 
-1. **Create the schema file**: `backend/src/modules/widgets/schemas.py`
-2. **Define a `WidgetBase`** with the fields and input rules the create and update bodies share
-3. **Add `WidgetCreate`, `WidgetRead`, `WidgetUpdate`** (and any internal variants you need)
-4. **Wire them up** in the module's `routes.py` and `service.py`
+## 为新模块添加 Schema
+
+1. **创建文件**：`backend/src/modules/widgets/schemas.py`。
+2. **定义 `WidgetBase`**：包含创建和更新请求共用的字段及输入规则。
+3. **添加 `WidgetCreate`、`WidgetRead`、`WidgetUpdate`**，以及需要的内部变体。
+4. **在模块的 `routes.py` 和 `service.py` 中使用**。
 
 ```python
 # backend/src/modules/widgets/schemas.py
@@ -376,9 +411,13 @@ class WidgetUpdate(BaseModel):
     description: Annotated[str | None, Field(max_length=255, default=None)]
 ```
 
-## Common Pitfalls
+<a id="common-pitfalls"></a>
 
-### Don't expose sensitive fields
+## 常见问题
+
+<a id="dont-expose-sensitive-fields"></a>
+
+### 不要暴露敏感字段
 
 ```python
 # BAD — leaks the password hash
@@ -394,7 +433,9 @@ class UserRead(BaseModel):
     profile_image_url: str
 ```
 
-### Don't query the database in validators
+<a id="dont-query-the-database-in-validators"></a>
+
+### 不要在校验器中查询数据库
 
 ```python
 # BAD — every request hits the DB twice
@@ -407,14 +448,18 @@ def email_must_be_unique(cls, v):
 # GOOD — let the DB unique constraint and service-layer logic handle it
 ```
 
-The boilerplate's `UserService.create` already checks for duplicates before insert. The DB unique constraint is the final guardrail.
+模板的 `UserService.create` 已在插入前检查重复，数据库唯一约束提供最终保证。
 
-### Don't reuse the same schema for create and update
+<a id="dont-reuse-the-same-schema-for-create-and-update"></a>
 
-A `Create` schema requires fields that an `Update` schema should be able to omit. Splitting them avoids accidental "this field defaulted because the client forgot it" bugs.
+### 创建和更新不要复用同一 Schema
 
-## Next Steps
+`Create` 要求必填的字段，`Update` 应允许省略。分开定义可避免客户端漏传字段却被默认值意外覆盖的问题。
 
-1. **[CRUD Operations](crud.md)** - How schemas plug into FastCRUD
-2. **[Migrations](migrations.md)** - Manage the underlying database changes
-3. **[API Endpoints](../api/endpoints.md)** - Use schemas in route handlers
+<a id="next-steps"></a>
+
+## 后续步骤
+
+1. **[CRUD 操作](crud.md)**：Schema 如何接入 FastCRUD。
+2. **[迁移](migrations.md)**：管理底层数据库变更。
+3. **[API 接口](../api/endpoints.md)**：在路由中使用 Schema。

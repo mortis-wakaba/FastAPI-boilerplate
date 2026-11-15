@@ -1,12 +1,18 @@
-# API Endpoints
+<a id="api-endpoints"></a>
 
-This guide shows the patterns the boilerplate uses for endpoints, so adding new ones stays consistent with the existing modules.
+# API 接口
 
-## Dependency Injection
+本指南介绍模板的接口模式，使新增接口与现有模块保持一致。
 
-This boilerplate supports two equivalent ways to inject FastAPI dependencies — you'll see both in the codebase, and either is correct.
+<a id="dependency-injection"></a>
 
-### Traditional style (explicit `Depends()`)
+## 依赖注入
+
+模板支持两种等价的 FastAPI 依赖注入方式，代码库中两种都存在，均可使用。
+
+<a id="traditional-style-explicit-depends"></a>
+
+### 传统方式：显式 `Depends()`
 
 ```python
 from fastapi import Depends
@@ -22,7 +28,9 @@ async def list_items(
     ...
 ```
 
-### Modern style (Annotated type aliases)
+<a id="modern-style-annotated-type-aliases"></a>
+
+### 现代方式：Annotated 类型别名
 
 ```python
 from ...infrastructure.dependencies import AsyncSessionDep
@@ -35,16 +43,16 @@ async def list_items(
     ...
 ```
 
-`infrastructure/dependencies.py` holds the alias every project has, whatever features it selected:
+`infrastructure/dependencies.py` 提供所有项目都需要的别名，与所选功能无关：
 
-| Alias | Resolves to |
-|---|---|
+| 别名 | 解析为 |
+|------|--------|
 | `AsyncSessionDep` | `Annotated[AsyncSession, Depends(async_session)]` |
 
-The aliases that resolve a caller belong to accounts, in `infrastructure/auth/deps.py`:
+解析调用者的别名属于 accounts，位于 `infrastructure/auth/deps.py`：
 
-| Alias | Resolves to |
-|---|---|
+| 别名 | 解析为 |
+|------|--------|
 | `CurrentUserDep` | `Annotated[dict[str, Any], Depends(get_current_user)]` |
 | `CurrentSuperUserDep` | `Annotated[dict[str, Any], Depends(get_current_superuser)]` |
 | `OptionalUserDep` | `Annotated[dict[str, Any] \| None, Depends(get_optional_user)]` |
@@ -52,20 +60,22 @@ The aliases that resolve a caller belong to accounts, in `infrastructure/auth/de
 | `CurrentPermissionsDep` | `Annotated[frozenset[str], Depends(get_current_permissions)]` |
 | `OAuth2FormDep` | `Annotated[OAuth2PasswordRequestForm, Depends()]` |
 
-Per-module service aliases live in `modules/<name>/dependencies.py`:
+模块服务别名位于 `modules/<name>/dependencies.py`：
 
-| File | Alias |
-|---|---|
+| 文件 | 别名 |
+|------|------|
 | `modules/user/dependencies.py` | `UserServiceDep` |
 | `modules/tier/dependencies.py` | `TierServiceDep` |
 | `modules/rate_limit/dependencies.py` | `RateLimitServiceDep` |
 | `modules/api_keys/dependencies.py` | `APIKeyServiceDep` |
 
-Both styles produce the same runtime behavior. The alias form reduces repetition and makes route signatures easier to scan.
+两种方式运行行为一致，别名可减少重复，使路由签名更易阅读。
 
-## Quick Start
+<a id="quick-start"></a>
 
-A typical endpoint lives in `modules/<feature>/routes.py` and delegates work to a service:
+## 快速开始
+
+典型接口位于 `modules/<feature>/routes.py`，将工作交给服务：
 
 ```python
 # backend/src/modules/widgets/routes.py
@@ -102,7 +112,7 @@ async def get_widget(
     return widget
 ```
 
-Register the router in `interfaces/api/v1/__init__.py`:
+在 `interfaces/api/v1/__init__.py` 注册路由：
 
 ```python
 from ....modules.widgets.routes import router as widgets_router
@@ -110,19 +120,23 @@ from ....modules.widgets.routes import router as widgets_router
 router.include_router(widgets_router, prefix="/widgets")
 ```
 
-The endpoint is now live at `GET /api/v1/widgets/{widget_id}`.
+接口地址为 `GET /api/v1/widgets/{widget_id}`。
 
-## Common Patterns
+<a id="common-patterns"></a>
 
-The pattern across every module is the same:
+## 常见模式
 
-1. **Routes** define HTTP shape and delegate to a service
-2. **Service** holds business logic (permission checks, multi-step orchestration)
-3. **CRUD** does the database I/O
+所有模块遵循相同模式：
 
-Below are the canonical patterns. They mirror what's already in `modules/user/routes.py`, `modules/tier/routes.py`, etc.
+1. **路由**定义 HTTP 结构，并调用服务。
+2. **服务**包含权限检查、多步骤编排等业务逻辑。
+3. **CRUD** 执行数据库 I/O。
 
-### Get a Single Item
+以下示例对应 `modules/user/routes.py`、`modules/tier/routes.py` 等现有实现。
+
+<a id="get-a-single-item"></a>
+
+### 获取单条记录
 
 ```python
 @router.get("/{widget_id}", response_model=WidgetRead)
@@ -138,7 +152,9 @@ async def get_widget(
     return widget
 ```
 
-### Get Multiple Items (Paginated)
+<a id="get-multiple-items-paginated"></a>
+
+### 获取多条记录（分页）
 
 ```python
 from fastcrud import PaginatedListResponse, compute_offset, paginated_response
@@ -159,9 +175,11 @@ async def list_widgets(
     return paginated_response(crud_data=result, page=page, items_per_page=items_per_page)
 ```
 
-See [Pagination](pagination.md) for the full pattern.
+完整模式见[分页](pagination.md)。
 
-### Create
+<a id="create"></a>
+
+### 创建
 
 ```python
 @router.post("/", response_model=WidgetRead, status_code=201)
@@ -173,7 +191,7 @@ async def create_widget(
     return await widget_service.create(widget, db)
 ```
 
-The service does the duplicate check / business validation:
+服务负责重复检查和业务校验：
 
 ```python
 # modules/widgets/service.py
@@ -183,7 +201,9 @@ async def create(self, widget: WidgetCreate, db: AsyncSession) -> dict[str, Any]
     return await crud_widgets.create(db=db, object=widget, schema_to_select=WidgetRead)
 ```
 
-### Update
+<a id="update"></a>
+
+### 更新
 
 ```python
 @router.patch("/{widget_id}", response_model=WidgetRead)
@@ -196,7 +216,9 @@ async def update_widget(
     return await widget_service.update(widget_id, values, db)
 ```
 
-### Delete (Soft Delete)
+<a id="delete-soft-delete"></a>
+
+### 删除（软删除）
 
 ```python
 @router.delete("/{widget_id}", status_code=204)
@@ -208,13 +230,17 @@ async def delete_widget(
     await widget_service.delete(widget_id, db)
 ```
 
-`crud_widgets.delete()` flips `is_deleted=True` if the model uses `SoftDeleteMixin`. Use `db_delete()` when you actually want to remove the row.
+模型使用 `SoftDeleteMixin` 时，`crud_widgets.delete()` 设置 `is_deleted=True`。真正移除行时使用 `db_delete()`。
 
-## Authentication
+<a id="authentication"></a>
 
-All session-based auth dependencies live in `infrastructure/auth/dependencies`.
+## 身份认证
 
-### Require Login
+会话认证依赖均位于 `infrastructure/auth/dependencies`。
+
+<a id="require-login"></a>
+
+### 要求登录
 
 ```python
 from ...infrastructure.auth.dependencies import get_current_user
@@ -229,7 +255,9 @@ async def my_widget(
     return await widget_service.get_by_owner(current_user["id"], db)
 ```
 
-### Optional Auth
+<a id="optional-auth"></a>
+
+### 可选认证
 
 ```python
 from ...infrastructure.auth.dependencies import get_optional_user
@@ -244,7 +272,9 @@ async def list_widgets(
     ...
 ```
 
-### Superuser Only
+<a id="superuser-only"></a>
+
+### 仅超级用户
 
 ```python
 from ...infrastructure.auth.dependencies import get_current_superuser
@@ -261,11 +291,13 @@ async def hard_delete_widget(
     return {"message": "Widget permanently deleted"}
 ```
 
-The leading underscore on the dependency-only parameter is the convention used across the boilerplate.
+仅用于触发依赖的参数以前导下划线命名，这是模板的通用约定。
 
-### Permission Required
+<a id="permission-required"></a>
 
-`require_permissions` returns a dependency that answers 403 unless the caller holds every permission named. Superusers always pass. Because it injects nothing into the handler, it belongs in the decorator's `dependencies` list:
+### 要求权限
+
+`require_permissions` 返回依赖，调用者缺少列出的任意权限则返回 403，超级用户始终通过。它不向处理器注入值，应放在装饰器的 `dependencies` 列表：
 
 ```python
 from ...infrastructure.auth.authorization import require_permissions
@@ -283,7 +315,7 @@ async def list_widgets(
     return await widget_service.get_all(db)
 ```
 
-When a handler needs the permission set itself — to branch, or to compare it against another user's — take `CurrentPermissionsDep`:
+处理器需要权限集合来分支处理或与其他用户比较时，注入 `CurrentPermissionsDep`：
 
 ```python
 from ...infrastructure.auth.deps import CurrentPermissionsDep
@@ -302,15 +334,22 @@ async def update_widget(
     ...
 ```
 
-The permission names must be registered in the `role` module's registry, or `require_permissions` raises at import time. See [Permissions](../authentication/permissions.md#role-based-permissions) for declaring them.
+权限名必须注册到 `role` 模块的注册表，否则 `require_permissions` 在导入时抛错。声明方式见[权限](../authentication/permissions.md#role-based-permissions)。
 
-### API Key Authentication
+<a id="api-key-authentication"></a>
 
-For machine-to-machine clients, see [Authentication](../authentication/index.md). API keys are managed via the `/api/v1/api-keys/*` endpoints in `modules/api_keys/routes.py`.
+### API 密钥认证
 
-## Path & Query Parameters
+机器间调用见[身份认证](../authentication/index.md)。API 密钥通过 `modules/api_keys/routes.py` 的 `/api/v1/api-keys/*` 接口管理。
 
-### Path Parameters
+<a id="path-query-parameters"></a>
+<a id="path--query-parameters"></a>
+
+## 路径和查询参数
+
+<a id="path-parameters"></a>
+
+### 路径参数
 
 ```python
 @router.get("/{widget_id}")
@@ -318,9 +357,11 @@ async def get_widget(widget_id: int, ...):
     ...
 ```
 
-FastAPI validates `widget_id` is an int automatically. Invalid input returns `422`.
+FastAPI 自动校验 `widget_id` 为整数，非法输入返回 `422`。
 
-### Simple Query Parameters
+<a id="simple-query-parameters"></a>
+
+### 简单查询参数
 
 ```python
 @router.get("/search")
@@ -333,7 +374,9 @@ async def search_widgets(
     return await widget_service.search(db=db, name=name, is_active=is_active)
 ```
 
-### Query Validation
+<a id="query-validation"></a>
+
+### 查询校验
 
 ```python
 from fastapi import Query
@@ -349,40 +392,47 @@ async def list_widgets(
     ...
 ```
 
-## Error Handling
+<a id="error-handling"></a>
 
-The boilerplate uses two layers of exceptions:
+## 错误处理
 
-### Domain exceptions (services)
+模板分为两层异常。
 
-Defined in `modules/common/exceptions.py`:
+<a id="domain-exceptions-services"></a>
+
+### 领域异常（服务层）
+
+原文列出 `modules/common/exceptions.py` 中的类型：
 
 - `ResourceNotFoundError`
 - `ResourceExistsError`
 - `PermissionDeniedError`
-- `UserNotFoundError`, `UserExistsError`
+- `UserNotFoundError`、`UserExistsError`
 - `TierNotFoundError`
 - `ValidationError`
 
-Service methods raise these — they don't know about HTTP.
+服务抛出这些异常，不感知 HTTP。
 
-### HTTP exceptions (routes)
+<a id="http-exceptions-routes"></a>
 
-Re-exported from FastCRUD in `infrastructure/http_exceptions.py`:
+### HTTP 异常（路由层）
 
-- `HTTPException` (the FastAPI base)
-- `BadRequestException` — 400
-- `UnauthorizedException` — 401
-- `ForbiddenException` — 403
-- `NotFoundException` — 404
-- `UnprocessableEntityException` — 422
-- `DuplicateValueException` — 409
-- `RateLimitException` — 429
+由 `infrastructure/http_exceptions.py` 从 FastCRUD 重新导出：
 
-### Domain Errors Need No Route Code
+- `HTTPException`：FastAPI 基类。
+- `BadRequestException`：400。
+- `UnauthorizedException`：401。
+- `ForbiddenException`：403。
+- `NotFoundException`：404。
+- `UnprocessableEntityException`：422。
+- `DuplicateValueException`：本节原文写为 409，异常处理专章写为 422。
+- `RateLimitException`：429。
 
-`register_exception_handlers(app)` installs a handler for `DomainError`, so a route lets the
-exception propagate and the client gets the right status and a `support_id`:
+<a id="domain-errors-need-no-route-code"></a>
+
+### 领域错误无需路由处理
+
+`register_exception_handlers(app)` 安装 `DomainError` 处理器。路由让异常继续传播，客户端即可获得正确状态和 `support_id`：
 
 ```python
 @router.patch("/{widget_id}", response_model=WidgetRead)
@@ -390,12 +440,13 @@ async def update_widget(...) -> dict[str, Any]:
     return await widget_service.update(widget_id, values, db)
 ```
 
-A route catches a domain error only when it wants to answer something else. See
-[Exception Handling](exceptions.md).
+只有需要不同响应时才捕获领域错误，见[异常处理](exceptions.md)。
 
-### Direct HTTP Exceptions
+<a id="direct-http-exceptions"></a>
 
-When you have an immediate HTTP-shaped failure with no service involvement, raise directly:
+### 直接抛出 HTTP 异常
+
+无需服务参与的即时 HTTP 错误，可以直接抛出：
 
 ```python
 from ...infrastructure.http_exceptions import BadRequestException
@@ -409,10 +460,11 @@ async def export_widget(widget_id: int, format: str) -> dict[str, str]:
     ...
 ```
 
-A service failure needs no route code: raise a domain error from the service and the global handler
-answers with its status. See [Exceptions](exceptions.md) for the full picture.
+服务失败无需路由代码处理，服务抛出领域异常后由全局处理器响应，完整说明见[异常处理](exceptions.md)。
 
-## File Uploads
+<a id="file-uploads"></a>
+
+## 文件上传
 
 ```python
 from fastapi import File, UploadFile
@@ -432,33 +484,41 @@ async def upload_avatar(
     return {"message": "Avatar uploaded successfully"}
 ```
 
-The boilerplate doesn't ship a default storage backend; pick one (local disk, S3, GCS) and add it as a settings group when you need it.
+模板不提供默认存储后端。需要时自行选择本地磁盘、S3 或 GCS，并添加配置分组。
 
-## Adding a New Endpoint Module
+<a id="adding-a-new-endpoint-module"></a>
 
-The full flow for adding `widgets`:
+## 添加新的接口模块
 
-### 1. Create the Module
+添加 `widgets` 的完整流程：
+
+<a id="1-create-the-module"></a>
+
+### 1. 创建模块
 
 ```bash
 mkdir -p backend/src/modules/widgets
 touch backend/src/modules/widgets/__init__.py
 ```
 
-### 2. Add the Stack
+<a id="2-add-the-stack"></a>
 
-| File | Contents |
-|------|----------|
-| `models.py` | SQLAlchemy `Widget` model (see [Models](../database/models.md)) |
-| `schemas.py` | `WidgetCreate`, `WidgetRead`, `WidgetUpdate` (see [Schemas](../database/schemas.md)) |
+### 2. 添加各层实现
+
+| 文件 | 内容 |
+|------|------|
+| `models.py` | SQLAlchemy `Widget` 模型，见[模型](../database/models.md) |
+| `schemas.py` | `WidgetCreate`、`WidgetRead`、`WidgetUpdate`，见 [Schema](../database/schemas.md) |
 | `crud.py` | `crud_widgets: FastCRUD = FastCRUD(Widget)` |
-| `service.py` | `WidgetService` with `create`, `get_by_id`, `update`, `delete` methods |
-| `routes.py` | `APIRouter` with the endpoints |
-| `permissions.py` | `StrEnum` of the module's permissions, if its routes are permission-gated (see [Permissions](../authentication/permissions.md#role-based-permissions)) |
+| `service.py` | `WidgetService`，提供 `create`、`get_by_id`、`update`、`delete` |
+| `routes.py` | 包含接口的 `APIRouter` |
+| `permissions.py` | 接口有权限要求时，定义权限 `StrEnum`，见[权限](../authentication/permissions.md#role-based-permissions) |
 
-### 3. Register the Model
+<a id="3-register-the-model"></a>
 
-In `backend/src/modules/__init__.py`:
+### 3. 注册模型
+
+在 `backend/src/modules/__init__.py`：
 
 ```python
 from .widgets.models import Widget
@@ -466,9 +526,11 @@ from .widgets.models import Widget
 __all__ = [..., "Widget"]
 ```
 
-### 4. Mount the Router
+<a id="4-mount-the-router"></a>
 
-In `backend/src/interfaces/api/v1/__init__.py`:
+### 4. 挂载路由
+
+在 `backend/src/interfaces/api/v1/__init__.py`：
 
 ```python
 from ....modules.widgets.routes import router as widgets_router
@@ -476,7 +538,9 @@ from ....modules.widgets.routes import router as widgets_router
 router.include_router(widgets_router, prefix="/widgets")
 ```
 
-### 5. Generate a Migration
+<a id="5-generate-a-migration"></a>
+
+### 5. 生成迁移
 
 ```bash
 cd backend
@@ -484,27 +548,33 @@ uv run --no-sync alembic revision --autogenerate -m "Add widgets table"
 uv run --no-sync alembic upgrade head
 ```
 
-### 6. Test
+<a id="6-test"></a>
+
+### 6. 测试
 
 ```bash
 curl http://localhost:8000/api/v1/widgets/
 ```
 
-Your routes are now visible in `/docs`.
+路由现在可在 `/docs` 中查看。
 
-## Best Practices
+<a id="best-practices"></a>
 
-1. **Delegate to a service** — keep `routes.py` thin. Routes handle HTTP; services hold rules.
-2. **Let domain errors propagate** — the global handler maps them, so error responses stay uniform.
-3. **Prefer `schema_to_select=`** — only return the columns the response model needs.
-4. **Use `*Update` schemas with all fields optional** — partial updates are the convention.
-5. **Match status codes to actions**: 201 on create, 204 on delete-with-no-body, 200 default.
-6. **Keep route signatures consistent** — `db` and `<feature>_service` injected via `Annotated[..., Depends(...)]`, dependency-only auth as `_`.
-7. **Don't import models across modules** — except for foreign-key relationships (and even then via `TYPE_CHECKING`).
+## 最佳实践
 
-## What's Next
+1. **委派给服务**：保持 `routes.py` 轻量，路由负责 HTTP，服务负责规则。
+2. **让领域异常传播**：全局处理器统一映射，保持错误响应一致。
+3. **优先使用 `schema_to_select=`**：只返回响应模型需要的列。
+4. **更新 Schema 全部字段可选**：按部分更新约定实现。
+5. **状态码匹配操作**：创建 201，无响应体删除 204，默认 200。
+6. **路由签名保持一致**：通过 `Annotated[..., Depends(...)]` 注入 `db` 和 `<feature>_service`，仅触发认证的依赖参数用 `_`。
+7. **不要跨模块导入模型**：外键关联除外，也尽量通过 `TYPE_CHECKING`。
 
-- **[Pagination](pagination.md)** — Paginate list endpoints with `PaginatedListResponse`
-- **[Exceptions](exceptions.md)** — The full exception model
-- **[API Versioning](versioning.md)** — How `/api/v1/` is wired and how to add `/api/v2/`
-- **[CRUD Operations](../database/crud.md)** — The data layer below your service
+<a id="whats-next"></a>
+
+## 后续步骤
+
+- **[分页](pagination.md)**：使用 `PaginatedListResponse`。
+- **[异常处理](exceptions.md)**：完整异常模型。
+- **[API 版本管理](versioning.md)**：`/api/v1/` 的组装与新增 `/api/v2/`。
+- **[CRUD 操作](../database/crud.md)**：服务下方的数据层。

@@ -1,20 +1,26 @@
-# CRUD Operations
+<a id="crud-operations"></a>
 
-This guide covers the CRUD (Create, Read, Update, Delete) operations available in the boilerplate via [FastCRUD](https://benavlabs.github.io/fastcrud/).
+# CRUD 操作
 
-## Overview
+本指南介绍模板通过 [FastCRUD](https://benavlabs.github.io/fastcrud/) 提供的创建、读取、更新和删除操作。
 
-The boilerplate uses **FastCRUD** for all database access. It gives you:
+<a id="overview"></a>
 
-- A consistent async API across every model
-- Automatic pagination helpers
-- Built-in soft delete support (when the model has `SoftDeleteMixin`)
-- Selective field loading via `schema_to_select`
-- Joined queries for related data
+## 概览
 
-## Where CRUD Lives
+模板使用 **FastCRUD** 访问数据库，提供：
 
-Each module owns its own FastCRUD instance, kept tiny and predictable:
+- 各模型一致的异步 API。
+- 自动分页辅助函数。
+- 模型具有 `SoftDeleteMixin` 时的内置软删除支持。
+- 通过 `schema_to_select` 选择加载字段。
+- 获取关联数据的连接查询。
+
+<a id="where-crud-lives"></a>
+
+## CRUD 位置
+
+每个模块拥有自己的 FastCRUD 实例，保持轻量且行为明确：
 
 ```python
 # backend/src/modules/user/crud.py
@@ -34,7 +40,7 @@ from .models import Tier
 crud_tiers: FastCRUD = FastCRUD(Tier)
 ```
 
-The CRUD instance is then imported by the module's `service.py`, which adds business logic on top — input validation, permission checks, password hashing, multi-step orchestration.
+模块的 `service.py` 导入 CRUD 实例，在其上添加输入校验、权限检查、密码哈希和多步骤编排等业务逻辑。
 
 ```python
 # Typical service method (modules/user/service.py)
@@ -55,9 +61,13 @@ async def create(self, user: UserCreate, db: AsyncSession) -> dict[str, Any]:
     return await crud_users.create(db=db, object=user_internal, schema_to_select=UserRead)
 ```
 
-## Read Operations
+<a id="read-operations"></a>
 
-### Get a Single Record
+## 读取操作
+
+<a id="get-a-single-record"></a>
+
+### 获取单条记录
 
 ```python
 # By id
@@ -76,7 +86,9 @@ user = await crud_users.get(
 )
 ```
 
-### Get Multiple Records
+<a id="get-multiple-records"></a>
+
+### 获取多条记录
 
 ```python
 # All non-deleted users, first 10
@@ -88,7 +100,7 @@ result = await crud_users.get_multi(
 )
 ```
 
-`get_multi` returns a dict shaped like:
+`get_multi` 返回以下结构的字典：
 
 ```python
 {
@@ -97,11 +109,13 @@ result = await crud_users.get_multi(
 }
 ```
 
-For full paginated responses (`page` / `has_more` / `items_per_page`), wrap the result with `paginated_response()` — see [Pagination](#pagination).
+需要包含 `page`、`has_more`、`items_per_page` 的完整分页响应时，用 `paginated_response()` 包装，见[分页](#pagination)。
 
-### Filter Operators
+<a id="filter-operators"></a>
 
-FastCRUD supports `__` operators on field names:
+### 过滤操作符
+
+FastCRUD 支持字段名后的 `__` 操作符：
 
 ```python
 # Substring match
@@ -114,18 +128,22 @@ await crud_users.get_multi(db=db, created_at__gt=cutoff_datetime)
 await crud_users.get_multi(db=db, tier_id__in=[1, 2, 3])
 ```
 
-Available operators include `__contains`, `__icontains`, `__startswith`, `__endswith`, `__gt`, `__ge`, `__lt`, `__le`, `__in`, `__not_in`, and others. See the [FastCRUD docs](https://benavlabs.github.io/fastcrud/) for the full list.
+包括 `__contains`、`__icontains`、`__startswith`、`__endswith`、`__gt`、`__ge`、`__lt`、`__le`、`__in`、`__not_in` 等。完整列表见 [FastCRUD 文档](https://benavlabs.github.io/fastcrud/)。
 
-### Check Existence
+<a id="check-existence"></a>
+
+### 检查是否存在
 
 ```python
 if await crud_users.exists(db=db, email="user@example.com"):
     raise UserExistsError("Email already registered")
 ```
 
-`exists()` is faster than `get()` when you only need a yes/no — it doesn't transfer the row.
+只需布尔结果时，`exists()` 比 `get()` 更快，因为不传输记录内容。
 
-### Count Records
+<a id="count-records"></a>
+
+### 统计记录数
 
 ```python
 total = await crud_users.count(db=db)
@@ -133,7 +151,9 @@ admins = await crud_users.count(db=db, is_superuser=True)
 active = await crud_users.count(db=db, is_deleted=False)
 ```
 
-## Create Operations
+<a id="create-operations"></a>
+
+## 创建操作
 
 ```python
 user_internal = UserCreateInternal(
@@ -146,22 +166,24 @@ user_internal = UserCreateInternal(
 created = await crud_users.create(db=db, object=user_internal)
 ```
 
-The pattern in service code:
+服务层的处理模式：
 
-1. Validate the *external* schema (`UserCreate`) on input
-2. Apply business rules (uniqueness check, password hashing, etc.)
-3. Build the *internal* schema (`UserCreateInternal`) with the values you actually want to persist
-4. Call `crud.create(db=db, object=internal_schema)`
+1. 校验输入的**外部** Schema（`UserCreate`）。
+2. 应用唯一性检查、密码哈希等业务规则。
+3. 用实际需要持久化的值构造**内部** Schema（`UserCreateInternal`）。
+4. 调用 `crud.create(db=db, object=internal_schema)`。
 
-Pass `schema_to_select=UserRead` if you want the returned dict trimmed to the public shape:
+需要将返回字典限制为公开结构时，传入 `schema_to_select=UserRead`：
 
 ```python
 created = await crud_users.create(db=db, object=user_internal, schema_to_select=UserRead)
 ```
 
-### Creating Records with Foreign Keys
+<a id="creating-records-with-foreign-keys"></a>
 
-For models that reference other rows, just include the FK column on the create schema:
+### 创建带外键的记录
+
+引用其他行的模型，只需在创建 Schema 中包含外键列：
 
 ```python
 new_rate_limit = RateLimitCreate(
@@ -174,7 +196,9 @@ new_rate_limit = RateLimitCreate(
 await crud_rate_limits.create(db=db, object=new_rate_limit)
 ```
 
-## Update Operations
+<a id="update-operations"></a>
+
+## 更新操作
 
 ```python
 # Update by id
@@ -188,9 +212,11 @@ await crud_users.update(
 await crud_users.update(db=db, object=UserUpdate(name="New Name"), username=username)
 ```
 
-Only fields set on the update schema are written — `*Update` schemas have every field as `Optional[T] = None`, and unset fields are skipped.
+只写入更新 Schema 中显式设置的字段。`*Update` 的全部字段均为 `Optional[T] = None`，未提供的字段会跳过。
 
-### Common Pattern: Validate Before Update
+<a id="common-pattern-validate-before-update"></a>
+
+### 常见模式：更新前校验
 
 ```python
 # Service method
@@ -201,9 +227,11 @@ if values.username and values.username != db_user["username"]:
 await crud_users.update(db=db, object=values, id=db_user["id"])
 ```
 
-### Bulk Update
+<a id="bulk-update"></a>
 
-`update()` accepts the same lookup args as `get_multi()` — pass non-id criteria to update many rows:
+### 批量更新
+
+`update()` 接受与 `get_multi()` 相同的查找参数，传入非 ID 条件可更新多行：
 
 ```python
 # Reset profile_image_url for everyone in a deprecated tier
@@ -214,9 +242,13 @@ await crud_users.update(
 )
 ```
 
-## Delete Operations
+<a id="delete-operations"></a>
 
-### Soft Delete (default for models with `SoftDeleteMixin`)
+## 删除操作
+
+<a id="soft-delete-default-for-models-with-softdeletemixin"></a>
+
+### 软删除（具有 `SoftDeleteMixin` 的模型的默认行为）
 
 ```python
 # Sets is_deleted=True and deleted_at=now()
@@ -226,26 +258,32 @@ await crud_users.delete(db=db, id=user_id)
 soft_deleted = await crud_users.get(db=db, id=user_id, is_deleted=True)
 ```
 
-### Hard Delete
+<a id="hard-delete"></a>
+
+### 硬删除
 
 ```python
 # DELETE FROM user WHERE id = ?
 await crud_users.db_delete(db=db, id=user_id)
 ```
 
-### Filtering Out Soft-Deleted Records
+<a id="filtering-out-soft-deleted-records"></a>
 
-Add `is_deleted=False` to your queries:
+### 排除软删除记录
+
+查询时添加 `is_deleted=False`：
 
 ```python
 active_users = await crud_users.get_multi(db=db, is_deleted=False, limit=10)
 ```
 
-## Joined Queries
+<a id="joined-queries"></a>
 
-For models with relationships (e.g. `User.tier`), the relationship loads automatically via `lazy="selectin"`.
+## 连接查询
 
-For ad-hoc joins without a configured relationship, use `get_joined` / `get_multi_joined`:
+已有关联的模型，如 `User.tier`，通过 `lazy="selectin"` 自动加载关联。
+
+未配置关联的临时连接查询，使用 `get_joined` / `get_multi_joined`：
 
 ```python
 posts_with_authors = await crud_posts.get_multi_joined(
@@ -261,11 +299,13 @@ posts_with_authors = await crud_posts.get_multi_joined(
 # Each row: {..., "author_username": ..., "author_email": ...}
 ```
 
-The boilerplate also uses **`JoinConfig`** for more complex multi-join queries (see `UserService.get_rate_limits` for a real example with two joins).
+模板也使用 **`JoinConfig`** 构建更复杂的多表连接，包含两次连接的实际示例见 `UserService.get_rate_limits`。
 
-## Pagination
+<a id="pagination"></a>
 
-The boilerplate uses FastCRUD's `paginated_response()` helper to turn a `get_multi` result into a public-shaped paginated response:
+## 分页
+
+使用 FastCRUD 的 `paginated_response()` 将 `get_multi` 结果转换为公开分页响应：
 
 ```python
 from fastcrud import PaginatedListResponse, compute_offset, paginated_response
@@ -285,7 +325,7 @@ async def list_users(
     return paginated_response(crud_data=result, page=page, items_per_page=items_per_page)
 ```
 
-Response shape:
+响应结构：
 
 ```json
 {
@@ -297,9 +337,11 @@ Response shape:
 }
 ```
 
-## Selective Field Loading
+<a id="selective-field-loading"></a>
 
-`schema_to_select` lets the database return only the columns the caller cares about. The result is a plain dict matching the schema fields:
+## 选择性字段加载
+
+`schema_to_select` 使数据库只返回调用者需要的列，结果是与 Schema 字段对应的普通字典：
 
 ```python
 # Returns just id, name, username, email, profile_image_url, ...
@@ -311,9 +353,11 @@ result = await crud_users.get_multi(
 )
 ```
 
-Use this when you want to avoid fetching `hashed_password` or other heavy fields you won't use.
+可用来避免读取 `hashed_password` 或其他不会使用的大字段。
 
-## Complete Workflow Example
+<a id="complete-workflow-example"></a>
+
+## 完整工作流示例
 
 ```python
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -362,11 +406,11 @@ async def user_lifecycle(db: AsyncSession) -> None:
     assert soft_deleted["deleted_at"] is not None
 ```
 
-## Error Handling
+<a id="error-handling"></a>
 
-The shared shapes live in `modules/common/exceptions.py` (`ResourceNotFoundError`,
-`ResourceExistsError`, `ValidationError`, `PermissionDeniedError`, `PersistenceError`), and each
-feature subclasses them (`UserExistsError`, `TierNotFoundError`, …). A service raises:
+## 错误处理
+
+共享异常位于 `modules/common/exceptions.py`：`ResourceNotFoundError`、`ResourceExistsError`、`ValidationError`、`PermissionDeniedError`、`PersistenceError`。各功能继承它们定义 `UserExistsError`、`TierNotFoundError` 等异常。服务抛出：
 
 ```python
 async def create(self, user: UserCreate, db: AsyncSession) -> dict[str, Any]:
@@ -375,18 +419,21 @@ async def create(self, user: UserCreate, db: AsyncSession) -> dict[str, Any]:
     # ... create user ...
 ```
 
-The route needs no error code at all — the app's `DomainError` handler maps the exception to its
-status and answers with the message the exception chose:
+路由不需要错误转换代码。应用的 `DomainError` 处理器将异常映射为状态码，并返回异常选定的消息：
 
 ```python
 return await user_service.create(user, db)
 ```
 
-## Performance Tips
+<a id="performance-tips"></a>
 
-### Use `schema_to_select`
+## 性能建议
 
-Avoid loading columns you won't read:
+<a id="use-schema_to_select"></a>
+
+### 使用 `schema_to_select`
+
+避免加载不会使用的列：
 
 ```python
 # Good — only the public fields
@@ -396,7 +443,9 @@ user = await crud_users.get(db=db, id=user_id, schema_to_select=UserRead)
 user = await crud_users.get(db=db, id=user_id)
 ```
 
-### Use `exists()` for existence checks
+<a id="use-exists-for-existence-checks"></a>
+
+### 使用 `exists()` 检查存在性
 
 ```python
 # Good — boolean, no row transfer
@@ -409,7 +458,9 @@ if user:
     raise UserExistsError("Email taken")
 ```
 
-### Use `count()` for counts
+<a id="use-count-for-counts"></a>
+
+### 使用 `count()` 统计数量
 
 ```python
 # Good
@@ -420,12 +471,16 @@ result = await crud_users.get_multi(db=db, is_deleted=False, limit=10000)
 total = result["total_count"]  # works, but transfers data
 ```
 
-### Pre-fetch related data in services
+<a id="pre-fetch-related-data-in-services"></a>
 
-If a route calls `crud_users.get` then `crud_tiers.get(tier_id)` separately, prefer using the existing `User.tier` relationship (auto-loaded with `selectin`) or a `get_joined` call, so the database only round-trips once.
+### 在服务中预取关联数据
 
-## Next Steps
+路由如果分别调用 `crud_users.get` 和 `crud_tiers.get(tier_id)`，应优先使用现有的 `User.tier` 关联（通过 selectin 自动加载）或 `get_joined`。原文将其描述为减少数据库往返的方式。
 
-- **[Migrations](migrations.md)** — Manage schema changes with Alembic
-- **[API Endpoints](../api/endpoints.md)** — Wire CRUD into FastAPI routes
-- **[Caching](../caching/index.md)** — Cache CRUD results
+<a id="next-steps"></a>
+
+## 后续步骤
+
+- **[迁移](migrations.md)**：通过 Alembic 管理结构变更。
+- **[API 接口](../api/endpoints.md)**：将 CRUD 接入 FastAPI 路由。
+- **[缓存](../caching/index.md)**：缓存 CRUD 结果。

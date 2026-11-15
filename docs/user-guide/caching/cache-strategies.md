@@ -1,24 +1,16 @@
-# Cache Strategies
+<a id="cache-strategies"></a>
 
-Caching is easy to add and easy to get wrong. This page collects the practical patterns the boilerplate supports — how to name keys, when to invalidate, how to layer TTLs against write patterns, and how to warm the cache without bolting on a separate scheduler.
+# 缓存策略
 
-All examples use the boilerplate's real APIs: the [`@cache` decorator](redis-cache.md) for endpoint-level caching, and the provider exports (`get`, `set`, `delete`, `delete_pattern`, `exists`, `clear`) from `src.infrastructure.cache` for everything else.
+本页汇总键名、失效、TTL 与写模式配合，以及无需独立调度系统的预热方式。示例均使用真实 API：[路由装饰器](redis-cache.md)及 `src.infrastructure.cache` 导出的 `get`、`set`、`delete`、`delete_pattern`、`exists`、`clear`。
 
-## Picking a Key Naming Scheme
+<a id="picking-a-key-naming-scheme"></a>
 
-The decorator generates keys as `{formatted_key_prefix}[:{resource_id}][:q={query}][:u={caller}]`:
-the resource id when the route names one, the parameters the route declares, sorted and
-percent-escaped (so `?a=1&b=2` and `?b=2&a=1` share one entry, two pages never do, and a value
-holding a delimiter cannot read back as the parameters it spells), and the caller unless the route
-passes `per_caller=False`. The parameters come from the route, so an alias, a parameter a dependency
-reads and the fields of a query model each count under the name the query carries. Your job is to
-pick a `key_prefix` (and any `{kwarg}` placeholders) that:
+## 键命名
 
-1. **Doesn't collide** with unrelated caches
-2. **Matches your invalidation surface** — if you'll wipe by user, include the user identifier
-3. **Reads cleanly** in `redis-cli KEYS '*'` while debugging
+格式为 `{formatted_key_prefix}[:{resource_id}][:q={query}][:u={caller}]`。包含声明的资源 ID、按路由声明名称读取后排序和百分号编码的查询参数，以及默认的调用者。参数别名、依赖读取参数和查询模型字段均计入。参数顺序不同共享条目，不同页不共享，分隔符不能混淆。`per_caller=False` 时省略调用者。
 
-Patterns the codebase encourages:
+前缀和 `{kwarg}` 应避免无关碰撞、匹配失效范围，并便于在 `redis-cli KEYS '*'` 调试时阅读。
 
 ```python
 # Simple resource by id
@@ -39,19 +31,17 @@ Patterns the codebase encourages:
 # → analytics_5_30d:summary
 ```
 
-**Avoid** prefixes that:
+避免：以原始 ID 起头如 `{post_id}_comments`；直接拼接无限长用户输入如 `search:{raw_query}`，应先哈希；无意义的混合前缀如 `data:42`。
 
-- Use raw resource IDs as the prefix (`{post_id}_comments`) — collisions are silent
-- Include unbounded user input directly (`search:{raw_query}`) — hash long/free-text inputs first
-- Mix unrelated resources at the same level (`data:42`) — debug nightmare
+<a id="invalidation-strategies"></a>
 
-## Invalidation Strategies
+## 失效策略
 
-There are essentially three invalidation strategies you'll combine:
+<a id="1-ttl-only-eventually-correct"></a>
 
-### 1. TTL Only ("eventually correct")
+### 1. 仅 TTL：最终更新
 
-Just expire the cache; never invalidate explicitly.
+仅过期，不显式失效：
 
 ```python
 @cache(key_prefix="popular_widgets", expiration=300)  # 5 minutes
@@ -59,13 +49,13 @@ async def get_popular(request: Request, ...):
     ...
 ```
 
-**When to use:** read-only or near-read-only data where 1–5 minutes of staleness is acceptable. Reference data (countries, tier definitions), aggregates (top-N lists), expensive computations whose inputs change rarely.
+适合可接受 1–5 分钟陈旧的只读或近只读数据，如国家、等级、Top-N 聚合和输入很少变化的计算。不适合用户刚编辑就期望看见的新值。
 
-**Don't use for:** anything a user just edited and expects to see immediately.
+<a id="2-write-through-invalidation-strict-consistency"></a>
 
-### 2. Write-Through Invalidation ("strict consistency")
+### 2. 写后失效
 
-Mutations on the same `(key_prefix, resource_id_name)` automatically delete the matching key. Add `to_invalidate_extra` for related caches:
+相同 `(key_prefix, resource_id_name)` 的写操作自动清对应键，关联项使用 `to_invalidate_extra`：
 
 ```python
 @router.patch("/{widget_id}")
@@ -86,15 +76,15 @@ async def update_widget(
     return await widget_service.update(widget_id, values, db)
 ```
 
-The decorator deletes the keys **after** the handler returns successfully — failed mutations don't touch the cache.
+处理器成功返回**之后**清理，失败不动缓存。适合直接缓存的资源和少量固定关联缓存，不适合广泛的逐用户列表清理。
 
-**When to use:** mutations to a resource that's directly cached, plus a small fixed set of related caches (this user's list, the global count, etc).
+> 译注：原文将本节称为 “Write-Through Invalidation（strict consistency）”。这里按其描述译为写后失效，该名称本身不构成严格一致性的保证。
 
-**Don't use for:** broad invalidations across many user-scoped lists — that's pattern-based territory.
+<a id="3-pattern-based-invalidation-blast-radius"></a>
 
-### 3. Pattern-Based Invalidation ("blast radius")
+### 3. 模式失效
 
-For wipes that touch many keys at once (paginated lists, search caches), use pattern matching:
+一次清多页或搜索结果：
 
 ```python
 @router.delete("/{widget_id}")
@@ -110,16 +100,16 @@ async def delete_widget(request: Request, widget_id: int, owner_id: int, ...) ->
     await widget_service.delete(widget_id, db)
 ```
 
-!!! warning "Memcached doesn't support patterns"
-    `pattern_to_invalidate_extra` raises `PatternMatchingNotSupportedError` when `CACHE_BACKEND=memcached`. The non-pattern delete still happens. Use Redis if you need pattern-based invalidation.
+!!! warning "Memcached 不支持模式"
+    会抛 `PatternMatchingNotSupportedError`，普通删除仍执行，需要模式时使用 Redis。
 
-**When to use:** paginated or filtered lists where you don't know how many keys exist, search-result caches, anything where the prefix is a stable namespace.
+适合数量未知的分页、过滤、搜索缓存及稳定命名空间，不适合窄范围清理，因为每次扫描比单个 `DEL` 更贵。
 
-**Don't use for:** narrow invalidations — you're scanning Redis on every mutation, which is much more expensive than a single `DEL`.
+<a id="combining-the-three"></a>
 
-## Combining the Three
+## 组合三种方式
 
-Real services usually mix all three:
+实际服务常混合使用：
 
 ```python
 @router.put("/{widget_id}")
@@ -139,11 +129,13 @@ async def update_widget(request: Request, widget_id: int, owner_id: int, ...) ->
     return await widget_service.update(widget_id, values, db)
 ```
 
-The TTL is your safety net — even if you forget an invalidation, the cache self-heals within 15 minutes.
+TTL 是兜底，即使漏失效，示例缓存也在 15 分钟内过期恢复。
 
-## Cache Aside (Service-Layer Caching)
+<a id="cache-aside-service-layer-caching"></a>
 
-The decorator covers route-level caching. For caching inside services or background tasks, use the provider API directly:
+## 旁路缓存：服务层
+
+路由之外的服务和任务直接使用 provider：
 
 ```python
 from src.infrastructure.cache.provider import get, set, delete
@@ -169,19 +161,19 @@ async def invalidate_user_score(user_id: int) -> None:
     await delete(key=f"user_score:{user_id}")
 ```
 
-Conventions:
+约定：读取与失效使用完全相同键；先成功计算再 set，避免缓存错误；读取和刷新使用一致 TTL。
 
-- **Always use the same key format** in both the read and the invalidate path — copy/paste mistakes here are the most common cause of "cache won't update"
-- **Compute first, write second.** Never `set` a value before you've successfully computed it; you'd cache an error.
-- **Use the same TTL across reads and refreshes** so behavior is predictable.
+<a id="cache-stampede-mitigation"></a>
 
-## Cache Stampede Mitigation
+## 缓存击穿与集中失效
 
-When a hot cache key expires, every concurrent request can hit the database before any of them writes the new value back — a stampede. Mitigations the boilerplate's stack supports:
+热点过期时，并发请求可能在首个回填前一起打到数据库。可用：
 
-### Slightly Randomized TTLs
+<a id="slightly-randomized-ttls"></a>
 
-Pick TTLs in a range, not a single value, so a thousand keys created at the same time don't expire in lockstep:
+### TTL 加随机量
+
+让同一时间建立的大量键分散过期：
 
 ```python
 import random
@@ -190,11 +182,13 @@ ttl = 1800 + random.randint(-60, 60)  # 30 min ± 1 min
 await set(key=cache_key, value=payload, expiration=ttl)
 ```
 
-This is enough for most workloads.
+原文认为足以覆盖多数负载。
 
-### Refresh Ahead of Expiration
+<a id="refresh-ahead-of-expiration"></a>
 
-Inside the service, decide based on a "soft" TTL whether to recompute opportunistically:
+### 提前刷新
+
+在服务中按软 TTL 判断是否重新计算：
 
 ```python
 SOFT_TTL = 1500  # 25 min — recompute eagerly past this
@@ -213,19 +207,21 @@ async def get_payload(user_id: int) -> dict:
     return fresh
 ```
 
-Past the soft TTL, the next request triggers a recompute even though the cache is still warm — the next concurrent request still gets the fresh value. This is enough to prevent stampedes for moderately hot keys.
+软 TTL 到期后，下个请求在硬过期前触发刷新。原文称这对中等热点有效。极热键如每秒万次榜单可在重计算路径使用 Redis `SET key value NX EX 30` 分布式锁，模板未内置。
 
-For genuinely hot keys (top trending list with 10k req/s), reach for a distributed lock (`SET key value NX EX 30`) inside the recompute path. The boilerplate doesn't ship one, but Redis primitives are sufficient.
+<a id="cache-warming"></a>
 
-## Cache Warming
+## 预热
 
-Cache warming proactively populates the cache so the first user request after a deploy isn't a cold miss. Two reasonable places to do it in the boilerplate:
+提前填充缓存，避免部署后首请求冷启动。
 
-### At Application Startup (in the lifespan)
+<a id="at-application-startup-in-the-lifespan"></a>
 
-The boilerplate's `lifespan_factory` (in `infrastructure/app_factory.py`) is where the cache is initialized. Warming sits naturally just after that point — but only for genuinely **small** datasets (reference tables, tier definitions, top-N aggregates). Don't pull a million rows into Redis on every boot.
+### 应用启动时
 
-The pattern, in your own `interfaces/main.py` setup:
+缓存初始化在 `infrastructure/app_factory.py` 的 `lifespan_factory`，可在其后预热，但只用于真正**小型**数据，如参考表、等级、Top-N，不要每次启动加载百万行。
+
+自定义 `interfaces/main.py` 示例：
 
 ```python
 from contextlib import asynccontextmanager
@@ -254,11 +250,13 @@ async def _warm_reference_data():
         await set(key=f"tier:{tier['id']}", value=tier, expiration=86400)
 ```
 
-Wire it by passing `lifespan=lifespan` to `create_application()`.
+通过 `create_application(lifespan=lifespan)` 接入。
 
-### As a Taskiq Task
+<a id="as-a-taskiq-task"></a>
 
-For larger or periodic warming, use a Taskiq task on a schedule. See [Background Tasks](../background-tasks/index.md) for the worker setup; the warming logic is the same — fetch data, call `set()`.
+### Taskiq 定时任务
+
+较大或周期性预热用 Taskiq，见[后台任务](../background-tasks/index.md)，逻辑仍是读数据并 set：
 
 ```python
 # backend/src/modules/cache/tasks.py
@@ -272,11 +270,13 @@ async def warm_top_widgets() -> None:
     await set(key="top_widgets", value=top, expiration=600)
 ```
 
-Schedule it to run every 5 minutes (or whatever's shorter than the TTL) and the cache is always warm.
+每五分钟或小于 TTL 的间隔运行，维持缓存热度。
 
-## Negative Caching
+<a id="negative-caching"></a>
 
-When a lookup misses the database too, cache the miss for a short window so subsequent requests don't re-hit the database:
+## 空结果缓存
+
+数据库也未命中时短暂缓存缺失，避免重复查询：
 
 ```python
 from src.infrastructure.cache.provider import get, set
@@ -303,13 +303,13 @@ async def get_widget(widget_id: int, db: AsyncSession) -> dict | None:
     return result
 ```
 
-Keep negative TTLs **much shorter** than positive ones — the row will appear eventually and you don't want users to keep getting 404s for a minute after creation.
+缺失 TTL 应远短于正常值，否则创建后还会持续返回旧 404。
 
-## Per-Caller vs Shared Caches
+<a id="per-caller-vs-shared-caches"></a>
 
-A cached response is per caller by default, so a personalized route cannot serve one person's
-response to another. `caller_from` names the argument the caller is read from, which holds a
-`Principal`:
+## 逐调用者与共享缓存
+
+默认每调用者独立，防止个性化结果串用。`caller_from` 指向包含 `Principal` 的参数：
 
 ```python
 @router.get("/me/dashboard")
@@ -319,52 +319,44 @@ async def my_dashboard(request: Request, principal: CurrentPrincipalDep, ...):
 # → dashboard:u=5, and dashboard:u=9 for somebody else
 ```
 
-A credential that carries a scope is keyed apart from the account behind it: an API key scoped to
-`user.read` holds less than its owner's session does, so `dashboard:u=5/9f0c…` is the entry it reads
-and writes, and two scopes of one account are two entries. A `current_user` mapping is the account
-rather than the credential, so naming one leaves the route uncached rather than storing a session's
-response where that key would read it.
+带 scope 的凭据与账户会话不同，如 `user.read` 密钥使用 `dashboard:u=5/9f0c…`，同账户不同 scope 也分开。`current_user` 字典只描述账户，无法区分凭据，指定它会跳过缓存，而非把会话响应给密钥。
 
-**A write clears the entry of the caller that wrote, and no other.** So one account's own
-credentials can read a stale response after it writes through another of them: a session's `PATCH`
-clears `dashboard:u=5` and leaves `dashboard:u=5/9f0c…` to its TTL. Entries of other accounts were
-never cleared by a write either. Where that matters, give the write
-`pattern_to_invalidate_extra=["dashboard:*"]` on a backend that supports patterns, which Redis does
-and memcached does not.
+**写入只清写入凭据自己的条目**。会话 PATCH 清 `dashboard:u=5`，却保留密钥条目到 TTL，其他账户也不会被清。需要同步失效时，在写路由设置 `pattern_to_invalidate_extra=['dashboard:*']`，后端需支持模式，Redis 支持、Memcached 不支持。
 
-A route whose response is the same for everybody says so, and shares one entry:
+所有人响应相同时可共享：
 
 ```python
 @cache(key_prefix="rate_limits", per_caller=False)
 ```
 
-**When is `per_caller=False` safe?** When the response doesn't depend on who asked: it holds no
-personal data, and no part of it is filtered by the caller's permissions, tier or ownership. If you
-have to think about it, leave the default on — or don't cache the route at all, since a hot per-user
-response often costs more in cache round trips than it saves.
+`per_caller=False` 仅在不含个人数据，且不按权限、等级或归属过滤时安全。不确定就保留默认，或不缓存，因为每用户热响应的缓存往返可能反而更贵。
 
-A route that keeps the default and whose named argument resolves to nothing is **not cached**: the
-decorator logs a warning and calls through, rather than share one entry between everyone. A route
-that keeps the default and names no argument at all raises `ValueError` where it is declared.
+默认模式下指定参数却解析为空时不缓存，警告后执行。完全未命名调用者参数则在声明时抛 `ValueError`。
 
-## Picking TTLs
+<a id="picking-ttls"></a>
 
-Default is one hour (`3600`). Override per route based on staleness tolerance:
+## 选择 TTL
 
-| Data shape                                    | Suggested TTL              |
-|-----------------------------------------------|----------------------------|
-| Static reference data (tier list, countries)  | 24 hours (`86400`)         |
-| User profile / public objects                 | 5–30 minutes (`300`–`1800`)|
-| Paginated list endpoints                      | 1–5 minutes (`60`–`300`)   |
-| Search results                                | 5–15 minutes (`300`–`900`) |
-| Frequently changing dashboards                | 30–60 seconds              |
-| Negative caches (404 lookups)                 | 30–120 seconds             |
+默认 3600 秒，按容忍陈旧程度覆盖：
 
-When in doubt, start short. It's cheap to raise a TTL once you trust the invalidation paths — much harder to debug stale-data complaints from a 24-hour cache.
+| 数据 | 建议 TTL |
+|------|----------|
+| 等级、国家等静态数据 | 24 小时，86400 秒 |
+| 用户资料 / 公开对象 | 5–30 分钟，300–1800 秒 |
+| 分页列表 | 1–5 分钟，60–300 秒 |
+| 搜索结果 | 5–15 分钟，300–900 秒 |
+| 高频仪表盘 | 30–60 秒 |
+| 404 空结果 | 30–120 秒 |
 
-## Operational Notes
+不确定时从短 TTL 开始，验证失效路径后再增加，避免排查一天长的陈旧缓存。
 
-### Read your keys in production
+<a id="operational-notes"></a>
+
+## 运维
+
+<a id="read-your-keys-in-production"></a>
+
+### 在生产检查键
 
 ```bash
 redis-cli -h $CACHE_REDIS_HOST KEYS 'widget:*'
@@ -372,40 +364,50 @@ redis-cli -h $CACHE_REDIS_HOST TTL widget:42
 redis-cli -h $CACHE_REDIS_HOST GET widget:42
 ```
 
-If you can't tell from the key alone what's cached and how it's invalidated, your prefix is too short.
+只看键无法判断数据及失效方式，说明前缀过于简略。
 
-### Watch for fail-open behavior
+<a id="watch-for-fail-open-behavior"></a>
 
-The decorator catches Redis errors and falls through to the handler. That's good for availability but means you can have a "cache is down" outage that looks like a "DB is slow" outage on dashboards. Watch the logs for:
+### 监控失败放行
+
+装饰器捕获 Redis 错误后回源，提升可用性，但缓存故障可能在仪表盘表现为数据库变慢。关注日志：
 
 ```
 Cache backend not available: <error>
 ```
 
-Alert on the rate of those, not just on Redis being unreachable.
+按这些日志的发生率告警，而非只检查 Redis 可达性。
 
-### Don't cache personal data without thinking
+<a id="dont-cache-personal-data-without-thinking"></a>
 
-If your handler returns different bodies depending on auth state, headers, or query params, those have to be in the key. The decorator only sees what you pass in `key_prefix` placeholders and `resource_id_name`.
+### 缓存个人数据需完整键维度
 
-## Anti-Patterns to Avoid
+认证、请求头、查询参数影响结果时必须反映在键中。本节原文称装饰器只看前缀占位符和资源 ID，与上文自动包含查询及 principal 的新描述不一致。
 
-- **Caching mutation responses.** The decorator only caches GETs; if you find yourself wanting to cache a POST/PATCH response, you probably want to cache the underlying GET that's about to refresh anyway.
-- **Reaching into the cache for state that's not derived from the database.** Cached state must be reconstructable. If losing the cache loses real data, you needed a DB row, not a cache key.
-- **Mixing TTLs across paginated pages.** `widgets:page_1` expiring an hour before `widgets:page_2` produces inconsistent pagination. Use the same TTL across the entire prefix family.
-- **Pattern invalidation on every mutation.** Pattern scans get expensive at scale. Reach for them only when you genuinely need to wipe many keys at once.
+<a id="anti-patterns-to-avoid"></a>
 
-## Key Files
+## 避免的模式
 
-| Component             | Location                                              |
-|-----------------------|-------------------------------------------------------|
-| Decorator             | `backend/src/infrastructure/cache/decorator.py`       |
-| Provider API          | `backend/src/infrastructure/cache/provider.py`        |
-| Backends              | `backend/src/infrastructure/cache/backends/`          |
-| Lifespan integration  | `backend/src/infrastructure/app_factory.py`           |
+- **缓存写响应**：装饰器只缓存 GET，一般应缓存更新后将读取的 GET。
+- **缓存保存不可重建状态**：丢缓存会丢业务数据时，应使用数据库行。
+- **分页 TTL 混用**：同前缀各页不同过期会产生不一致。
+- **每次写都扫描模式**：规模大时昂贵，只在确需清多键时使用。
 
-## Next Steps
+<a id="key-files"></a>
 
-- **[Redis Cache](redis-cache.md)** — Decorator parameters and provider API reference
-- **[Client Cache](client-cache.md)** — `Cache-Control` headers for browser caching
-- **[Background Tasks](../background-tasks/index.md)** — Scheduling cache warming jobs with Taskiq
+## 关键文件
+
+| 组件 | 位置 |
+|------|------|
+| 装饰器 | `backend/src/infrastructure/cache/decorator.py` |
+| Provider | `backend/src/infrastructure/cache/provider.py` |
+| 后端 | `backend/src/infrastructure/cache/backends/` |
+| 生命周期 | `backend/src/infrastructure/app_factory.py` |
+
+<a id="next-steps"></a>
+
+## 后续步骤
+
+- **[Redis 缓存](redis-cache.md)**：参数和 provider 参考。
+- **[客户端缓存](client-cache.md)**：浏览器缓存头。
+- **[后台任务](../background-tasks/index.md)**：Taskiq 定时预热。

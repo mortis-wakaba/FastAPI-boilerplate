@@ -1,36 +1,34 @@
-# Observability
+<a id="observability"></a>
 
-The boilerplate ships no tracing and no metrics exporter. What it does ship is the material an
-exporter needs: structured logs, a support id on every failed request, readiness over each
-dependency, and a row per API-key request. This page says what that material is, and how to put
-[Logfire](https://logfire.pydantic.dev) — OpenTelemetry with Pydantic's SDK on top — in front of it
-without changing any of it.
+# 可观测性
 
-## What the project already emits
+模板未内置链路追踪或指标导出器，但提供导出所需信息：结构化日志、失败请求的支持编号、依赖就绪状态和 API 密钥请求记录。本页说明如何接入 [Logfire](https://logfire.pydantic.dev)，即带 Pydantic SDK 的 OpenTelemetry，而不改动这些基础能力。
 
-| Signal | Where it comes from | What it tells you |
-|---|---|---|
-| Application logs | `infrastructure/logging/`, through `get_logger()` | `LOG_FORMAT=json` writes one JSON object per line; `LOG_LEVEL` and the console/file handlers are settings ([Logging in Production](production.md#logging-in-production)) |
-| A support id per failed request | the catch-all error handler | the id in the `500` body appears in the log line for that request, which is what ties a user's report to the server side |
-| Refused sign-ins | `infrastructure/auth/audit.py` | one `WARNING` per refusal and per lockout, with the reason and the caller's address ([what a refusal records](authentication/sessions.md#what-a-refusal-records)) |
-| Dependency health | `GET /health/ready` | ready or not ready per poll, and a log line naming whatever was unreachable ([Health and Readiness](production.md#health-and-readiness)) |
-| API-key traffic | the `key_usage` table | path, method, status, duration, address and user agent per key request, queryable per key ([API Keys](authentication/api-keys.md#what-a-keys-usage-records)) |
+<a id="what-the-project-already-emits"></a>
 
-Two gaps are worth knowing before you add anything: log lines carry **no request id** unless you
-wire one (`infrastructure/logging/` ships `set_correlation_id()` and `add_correlation_id_filter()`,
-and nothing installs them), and nothing measures latency per route. Tracing fills both — a span per
-request, with the database queries under it.
+## 项目已有信号
 
-## Adding Logfire
+| 信号 | 来源 | 内容 |
+|------|------|------|
+| 应用日志 | `infrastructure/logging/`、`get_logger()` | `LOG_FORMAT=json` 每行一个 JSON，级别和控制台 / 文件处理器可配置，见[生产日志](production.md#logging-in-production) |
+| 失败请求支持编号 | 全局错误处理器 | 500 响应的 ID 出现在同次请求日志，关联用户反馈 |
+| 登录拒绝 | `infrastructure/auth/audit.py` | 每次拒绝和锁定一条 WARNING，含原因和地址，见[审计](authentication/sessions.md#what-a-refusal-records) |
+| 依赖健康 | `GET /health/ready` | 每轮就绪状态和不可达项日志，见[健康与就绪](production.md#health-and-readiness) |
+| API 密钥流量 | `key_usage` 表 | 路径、方法、状态、耗时、地址和 User-Agent，可逐密钥查询，见[密钥用量](authentication/api-keys.md#what-a-keys-usage-records) |
 
-Logfire is a dependency and three calls. It is not wired here, so this is a recipe rather than a
-feature:
+两处缺口：日志默认**没有请求 ID**，虽然提供 `set_correlation_id()` 和 `add_correlation_id_filter()`，但未安装；也没有逐路由延迟指标。追踪可补充每请求 span 及其下的数据库查询。
+
+<a id="adding-logfire"></a>
+
+## 添加 Logfire
+
+安装依赖并调用三个入口，以下是接入示例，并非内置功能：
 
 ```bash
 cd backend && uv add "logfire[fastapi,sqlalchemy,redis,httpx,asyncpg]"
 ```
 
-Put the configuration in one module of its own, `src/infrastructure/observability.py`:
+在独立模块 `src/infrastructure/observability.py` 配置：
 
 ```python
 """Tracing, off until LOGFIRE_TOKEN is set."""
@@ -63,7 +61,7 @@ def install(app: FastAPI) -> None:
     logfire.instrument_fastapi(app, excluded_urls=["/health", "/health/ready"])
 ```
 
-Then wire it where this app is composed, in `src/interfaces/main.py`:
+在 `src/interfaces/main.py` 组装：
 
 ```python
 from ..infrastructure.observability import configure_tracing, install as tracing_install
@@ -80,91 +78,57 @@ app = create_application(
 )
 ```
 
-Not `src/wiring/app.py`. The removal drill generates the wiring modules from
-`tools/removal_drill.py`, and `tests/unit/test_removal_drill.py` compares what it generates with
-what the project committed, so an installer written into `INSTALLERS` by hand fails that test.
-`main.py` is the composition root, and nothing regenerates it. A project that would rather have
-the generator know about this one makes it a feature
-([below](#if-you-turn-this-into-a-feature)).
+不要手动写入 `src/wiring/app.py`，它由 `tools/removal_drill.py` 生成，测试会比较生成结果。`main.py` 不会被重新生成，适合接入。需要生成器感知时，可[做成可移除功能](#if-you-turn-this-into-a-feature)。
 
-`send_to_logfire="if-token-present"` is what keeps it off: with no `LOGFIRE_TOKEN` in the
-environment, nothing leaves the process, which is the same rule every other optional thing in this
-project follows — a setting that enables something is off when unset. `LOGFIRE_TOKEN`,
-`LOGFIRE_SERVICE_NAME` and `LOGFIRE_ENVIRONMENT` are read from the environment, so the values above
-are defaults a deployment can override without touching the code.
+`send_to_logfire="if-token-present"` 使未设置 `LOGFIRE_TOKEN` 时不向进程外发送数据。`LOGFIRE_TOKEN`、`LOGFIRE_SERVICE_NAME`、`LOGFIRE_ENVIRONMENT` 从环境读取，上述默认值可由部署覆盖。
 
-!!! note "The worker is a second process"
-    `taskiq worker src.infrastructure.taskiq.worker:default_broker` never imports `main.py`,
-    so none of the above runs there. Call `configure_tracing()` in
-    `src/infrastructure/taskiq/worker.py` as well, with `service_name="worker"`, and the two
-    processes report separately. A task enqueued by a request is not joined to that request's trace
-    unless you propagate the context yourself (`logfire.propagate`).
+!!! note "Worker 是独立进程"
+    `taskiq worker src.infrastructure.taskiq.worker:default_broker` 不导入 main.py，因此需要在 `src/infrastructure/taskiq/worker.py` 也调用 `configure_tracing()`，使用 `service_name='worker'` 区分。请求入队任务不会自动关联追踪，需要自行通过 `logfire.propagate` 传播上下文。
 
-## What not to send
+<a id="what-not-to-send"></a>
 
-Instrumentation sees everything the app touches, so the defaults above are the careful ones:
+## 不应发送的内容
 
-- **`capture_headers` is off by default** in `instrument_fastapi`, and leaving it off keeps the
-  `Cookie` and `X-API-Key` headers out of your traces. Turning it on sends a session cookie — a
-  live credential — to a third party on every request.
-- **Query parameters are not statements.** `instrument_sqlalchemy` does not record bound
-  parameters, and `instrument_redis(capture_statement=True)` / `instrument_asyncpg(capture_parameters=True)`
-  would record the values your queries carry: email addresses, hashed passwords, session ids. Leave
-  both off.
-- **Logfire scrubs by pattern.** Anything whose key matches `password`, `secret`, `api[._ -]?key`
-  and the rest of its defaults is redacted; extend it with
-  `logfire.configure(scrubbing=logfire.ScrubbingOptions(extra_patterns=["token", "csrf"]))`. Pattern
-  scrubbing is a safety net, not a policy: it cannot know that `identifier` in a refused-login line
-  is a username.
-- **The refusal audit lines name identifiers.** They name only identifiers an account has
-  ([why](authentication/sessions.md#what-a-refusal-records)), but those are usernames and email
-  addresses, so forwarding the log through `LogfireLoggingHandler` sends them. A deployment that
-  must not export them narrows the two functions in `infrastructure/auth/audit.py`, or leaves the
-  logging handler out and exports traces alone.
-- **Probes are noise.** `/health` and `/health/ready` are polled every few seconds by every
-  orchestrator; `excluded_urls` keeps them out, which is also why the readiness check's own log
-  lines are the better signal for a dependency outage. Those entries are regular expressions, joined
-  and matched with `re.search` against the whole URL — `scheme://host/path`, without the query
-  string — so `"/health"` covers both probes, and any other path containing `/health`. Anchoring
-  with `^` matches nothing, because the string starts with the scheme and host; to limit it to the
-  two probes, end-anchor instead: `excluded_urls=[r"/health(/ready)?$"]`.
+插桩可看到应用接触的数据，因此示例采用以下默认值：
 
-## Sampling and cost
+- **不启用 `capture_headers`**：避免将 Cookie、`X-API-Key` 等有效凭据发送第三方。
+- **不捕获查询参数**：`instrument_sqlalchemy` 不记录绑定参数，避免启用 Redis `capture_statement=True` 和 asyncpg `capture_parameters=True`，否则可能记录邮箱、密码哈希、会话 ID。
+- **按模式脱敏**：Logfire 默认识别 password、secret、`api[._ -]?key` 等，可通过 `logfire.configure(scrubbing=logfire.ScrubbingOptions(extra_patterns=['token', 'csrf']))` 扩展。但模式只是兜底，无法判断 `identifier` 实际是用户名。
+- **审计标识属于个人数据**：只记录真实账户的标识仍可能是用户名和邮箱，经 `LogfireLoggingHandler` 转发会导出。禁止导出时修改 `infrastructure/auth/audit.py` 两个函数，或不安装日志处理器，只导出追踪。
+- **排除探针噪声**：`/health`、`/health/ready` 被频繁轮询，`excluded_urls` 可排除。依赖故障更适合看就绪日志。规则以 `re.search` 匹配不带查询的完整 `scheme://host/path`；`'/health'` 匹配两者及其他含该片段的路径，开头 `^` 会与 scheme 不匹配。仅排除这两个用 `excluded_urls=[r'/health(/ready)?$']`。
 
-A span per request plus a span per query is a lot of spans. `logfire.configure(sampling=...)` takes
-[`SamplingOptions`](https://logfire.pydantic.dev/docs/guides/advanced/sampling/) — a head rate, or
-tail sampling that keeps every trace with an error and a fraction of the rest, which is the shape
-worth starting from. `min_level` drops low-level records before they are built.
+<a id="sampling-and-cost"></a>
 
-## Doing without Logfire
+## 采样与成本
 
-Nothing above is Logfire-specific except the SDK: it writes OpenTelemetry, so the same recipe with
-`opentelemetry-instrumentation-fastapi` and an OTLP exporter reports to any collector. To send to
-another OpenTelemetry backend instead, set `send_to_logfire=False` and point the standard
-`OTEL_EXPORTER_OTLP_ENDPOINT` (and `OTEL_EXPORTER_OTLP_HEADERS`) at your collector; the
-instrumentation above stays as it is. If you want metrics without traces,
-`logfire.instrument_system_metrics()` covers the process, and the readiness endpoint plus your
-proxy's own access logs already cover whether the app is up and how fast it answers.
+每请求和每查询都产生 span，数据量很大。`logfire.configure(sampling=...)` 接受 [SamplingOptions](https://logfire.pydantic.dev/docs/guides/advanced/sampling/)，可头部采样，或尾部保留全部错误及其余部分比例，后者适合作为起点。`min_level` 在构建前过滤低级别记录。
 
-## If you turn this into a feature
+<a id="doing-without-logfire"></a>
 
-A project that wants observability to be removable like the others gives it a `FEATURES` entry in
-`tools/removal_drill.py` — the `observability` module, its tests, and its contribution to
-`src/wiring/app.py` — and settings that are off when unset. See
-[Composable Features](composable-features.md).
+## 不使用 Logfire
 
-## Key Files
+除 SDK 外，此方案基于 OpenTelemetry。可用 `opentelemetry-instrumentation-fastapi` 和 OTLP exporter 接任意 collector；或保持插桩，设置 `send_to_logfire=False` 以及 `OTEL_EXPORTER_OTLP_ENDPOINT`、`OTEL_EXPORTER_OTLP_HEADERS`。只需指标时，`logfire.instrument_system_metrics()` 覆盖进程；就绪接口及代理访问日志已提供可用性与响应速度信号。
 
-| Component | Location |
-|---|---|
-| Logging configuration and formatters | `backend/src/infrastructure/logging/` |
-| Readiness checks and their report | `backend/src/infrastructure/readiness.py`, `backend/src/wiring/hooks.py` |
-| Refused-login audit hooks | `backend/src/infrastructure/auth/audit.py` |
-| API-key usage rows | `backend/src/modules/api_keys/usage.py` |
-| The catch-all handler and its support id | `backend/src/modules/common/utils/error_handler.py` |
-| Where this recipe wires its installer | `backend/src/interfaces/main.py` |
-| Where a feature's installer is wired | `backend/src/wiring/app.py` |
+<a id="if-you-turn-this-into-a-feature"></a>
+
+## 做成可移除功能
+
+在 `tools/removal_drill.py` 的 `FEATURES` 添加 observability 模块、测试及对 `src/wiring/app.py` 的贡献，未设置时默认关闭，见[可组合功能](composable-features.md)。
+
+<a id="key-files"></a>
+
+## 关键文件
+
+| 组件 | 位置 |
+|------|------|
+| 日志配置和格式化器 | `backend/src/infrastructure/logging/` |
+| 就绪检查与报告 | `backend/src/infrastructure/readiness.py`、`backend/src/wiring/hooks.py` |
+| 登录拒绝审计 | `backend/src/infrastructure/auth/audit.py` |
+| 密钥用量 | `backend/src/modules/api_keys/usage.py` |
+| 全局错误与编号 | `backend/src/modules/common/utils/error_handler.py` |
+| 本示例接入点 | `backend/src/interfaces/main.py` |
+| 功能安装器接入点 | `backend/src/wiring/app.py` |
 
 ---
 
-[← Production](production.md){ .md-button } [Composable Features →](composable-features.md){ .md-button .md-button--primary }
+[← 生产环境](production.md){ .md-button } [可组合功能 →](composable-features.md){ .md-button .md-button--primary }

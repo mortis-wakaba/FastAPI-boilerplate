@@ -1,51 +1,58 @@
-# Installation Guide
+<a id="installation-guide"></a>
 
-This guide covers different ways to install the FastAPI Boilerplate depending on your needs.
+# 安装指南
 
-## System Requirements
+本指南介绍如何根据需求选择 FastAPI Boilerplate 的安装方式。
 
-- **Python**: 3.11 or higher
-- **Operating System**: Linux, macOS, or Windows (WSL2 recommended)
-- **Memory**: 4GB RAM minimum (8GB recommended)
-- **Disk Space**: ~2GB free
+<a id="system-requirements"></a>
 
-## Method 1: Docker Compose (Recommended)
+## 系统要求
 
-Docker Compose handles every service for you (Postgres + Redis + the app).
+- **Python**：3.11 或更高版本。
+- **操作系统**：Linux、macOS 或 Windows（推荐 WSL2）。
+- **内存**：至少 4 GB，推荐 8 GB。
+- **磁盘空间**：约 2 GB 可用空间。
 
-### Prerequisites
+<a id="method-1-docker-compose-recommended"></a>
 
-- [Docker](https://docs.docker.com/get-docker/) (20.10+)
-- [Docker Compose](https://docs.docker.com/compose/install/) (v2+)
-- [uv](https://docs.astral.sh/uv/getting-started/installation/), which runs the CLI that writes the compose file
+## 方式一：Docker Compose（推荐）
 
-### Steps
+Docker Compose 会管理全部服务：Postgres、Redis 和应用。
 
-1. **Clone the repository**:
+<a id="prerequisites"></a>
+
+### 前置条件
+
+- [Docker](https://docs.docker.com/get-docker/)（20.10+）
+- [Docker Compose](https://docs.docker.com/compose/install/)（v2+）
+- [uv](https://docs.astral.sh/uv/getting-started/installation/)，用于运行生成 Compose 文件的 CLI。
+
+<a id="steps"></a>
+
+### 步骤
+
+1. **克隆仓库**：
 
     ```bash
     git clone https://github.com/benavlabs/fastapi-boilerplate
     cd fastapi-boilerplate
     ```
 
-2. **Install the workspace**:
+2. **安装 workspace**：
 
     ```bash
     uv sync --all-packages --all-extras
     ```
 
-3. **Generate the compose file**:
+3. **生成 Compose 文件**：
 
     ```bash
     uv run --no-sync bp deploy generate local
     ```
 
-    `docker-compose.yml` is written at the repo root and is not committed, because the stack
-    you want depends on how you deploy. `local` is the hot-reload stack: API, Taskiq worker,
-    scheduler, Postgres and Redis. The other modes are `prod` and `nginx`, covered in
-    [CLI → Commands](../cli/commands.md).
+    `docker-compose.yml` 生成在仓库根目录，不提交到版本控制，因为所需服务组合取决于部署方式。`local` 提供热重载开发环境，包含 API、Taskiq Worker、调度器、Postgres 和 Redis。其他模式为 `prod` 和 `nginx`，见 [CLI → 命令](../cli/commands.md)。
 
-4. **Set up the environment file**:
+4. **设置环境文件**：
 
     ```bash
     cp backend/.env.example backend/.env
@@ -53,31 +60,37 @@ Docker Compose handles every service for you (Postgres + Redis + the app).
     # change ADMIN_PASSWORD and the default DB password.
     ```
 
-5. **Bring up the stack**, from the repo root:
+5. 在仓库根目录**启动服务**：
 
     ```bash
     docker compose up
     ```
 
-6. **Verify it's running**:
+6. **验证运行状态**：
 
     ```bash
     curl http://localhost:8000/health
     ```
 
-### What Gets Installed
+<a id="what-gets-installed"></a>
 
-- **App** (FastAPI + Uvicorn) on port 8000
-- **PostgreSQL** on port 5432
-- **Redis** on port 6379
+### 安装的服务
 
-## Method 2: Manual Installation (Local with uv)
+- **应用**（FastAPI + Uvicorn）：8000 端口。
+- **PostgreSQL**：5432 端口。
+- **Redis**：6379 端口。
 
-For development on your host machine. You provide PostgreSQL and Redis yourself.
+<a id="method-2-manual-installation-local-with-uv"></a>
 
-### Prerequisites
+## 方式二：手动安装（使用 uv 在本地运行）
 
-1. **Python 3.11+**:
+适用于在宿主机上开发，需要自行提供 PostgreSQL 和 Redis。
+
+<a id="prerequisites_1"></a>
+
+### 前置条件
+
+1. **Python 3.11+**：
 
     ```bash
     # Ubuntu/Debian
@@ -89,7 +102,7 @@ For development on your host machine. You provide PostgreSQL and Redis yourself.
     # Windows: download from python.org
     ```
 
-2. **uv** (fast Python package manager):
+2. **uv**（快速的 Python 包管理器）：
 
     ```bash
     # macOS / Linux
@@ -99,7 +112,7 @@ For development on your host machine. You provide PostgreSQL and Redis yourself.
     pip install uv
     ```
 
-3. **PostgreSQL**:
+3. **PostgreSQL**：
 
     ```bash
     # Ubuntu/Debian
@@ -109,7 +122,7 @@ For development on your host machine. You provide PostgreSQL and Redis yourself.
     brew install postgresql
     ```
 
-4. **Redis**:
+4. **Redis**：
 
     ```bash
     # Ubuntu/Debian
@@ -119,26 +132,28 @@ For development on your host machine. You provide PostgreSQL and Redis yourself.
     brew install redis
     ```
 
-### Steps
+<a id="steps_1"></a>
 
-1. **Clone the repository**:
+### 步骤
+
+1. **克隆仓库**：
 
     ```bash
     git clone https://github.com/benavlabs/fastapi-boilerplate
     cd fastapi-boilerplate
     ```
 
-    The repo is a [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/) — the deployable application lives in `backend/` and the developer CLI (`bp`) lives in `cli/`. Both share a single virtual environment at the repo root.
+    仓库采用 [uv workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/)，可部署应用位于 `backend/`，开发者 CLI（`bp`）位于 `cli/`。两者共用仓库根目录的一个虚拟环境。
 
-2. **Install Python dependencies**:
+2. **安装 Python 依赖**：
 
     ```bash
     uv sync --all-packages --all-extras
     ```
 
-    This syncs the whole workspace — backend, CLI, and dev tools — into one `.venv/` at the repo root. From here on, `uv run --no-sync <cmd>` works from any subdirectory; the flag skips uv's implicit sync, so a command starts immediately and leaves the environment and the lockfile alone. Re-running a plain `uv sync` without `--all-extras` is what removes ruff, mypy and pytest again.
+    这会把整个 workspace（后端、CLI 和开发工具）同步到仓库根目录下的 `.venv/`。之后可在任意子目录运行 `uv run --no-sync <cmd>`；该参数跳过 uv 隐式执行的依赖同步，使命令立即启动，并保持环境和锁文件不变。如果重新运行不带 `--all-extras` 的 `uv sync`，ruff、mypy 和 pytest 将再次被移除。
 
-3. **Set up environment variables**:
+3. **设置环境变量**：
 
     ```bash
     cp backend/.env.example backend/.env
@@ -146,14 +161,14 @@ For development on your host machine. You provide PostgreSQL and Redis yourself.
     # set a strong SECRET_KEY (or run `uv run --no-sync bp env gen-secret`), etc.
     ```
 
-    The CLI ships a few helpers for this step — see [CLI → Commands](../cli/commands.md):
+    CLI 提供了辅助命令，见 [CLI → 命令](../cli/commands.md)：
 
     ```bash
     uv run --no-sync bp env gen-secret      # print a fresh SECRET_KEY
     uv run --no-sync bp env validate        # audit the .env against the production validator
     ```
 
-4. **Set up PostgreSQL** (if not already configured):
+4. **设置 PostgreSQL**（尚未配置时）：
 
     ```bash
     sudo -u postgres psql
@@ -163,38 +178,42 @@ For development on your host machine. You provide PostgreSQL and Redis yourself.
     \q
     ```
 
-5. **Run database migrations** (from `backend/` — alembic looks for `alembic.ini` in cwd):
+5. **执行数据库迁移**：在 `backend/` 下运行，Alembic 会在当前工作目录查找 `alembic.ini`。
 
     ```bash
     cd backend
     uv run --no-sync alembic upgrade head
     ```
 
-6. **Create the initial admin user and tier**:
+6. **创建初始管理员和用户等级**：
 
     ```bash
     uv run --no-sync python -m scripts.setup_initial_data
     ```
 
-7. **Start the app**:
+7. **启动应用**：
 
     ```bash
     uv run --no-sync fastapi dev src/interfaces/main.py
     ```
 
-8. **(Optional) Start a Taskiq worker** (in a second terminal):
+8. **可选：启动 Taskiq Worker**，在第二个终端运行：
 
     ```bash
     uv run --no-sync taskiq worker src.infrastructure.taskiq.worker:default_broker
     ```
 
-## Method 3: Development Setup
+<a id="method-3-development-setup"></a>
 
-For contributors and anyone modifying the boilerplate itself.
+## 方式三：开发环境配置
 
-### Steps
+适用于贡献者以及需要修改模板本身的开发者。
 
-1. **Fork and clone**:
+<a id="steps_2"></a>
+
+### 步骤
+
+1. **Fork 并克隆仓库**：
 
     ```bash
     # Fork on GitHub first
@@ -202,35 +221,39 @@ For contributors and anyone modifying the boilerplate itself.
     cd fastapi-boilerplate
     ```
 
-2. **Install dev dependencies**:
+2. **安装开发依赖**：
 
     ```bash
     uv sync --all-packages --all-extras
     ```
 
-3. **Set up pre-commit hooks** (from the repo root):
+3. **安装 pre-commit 钩子**，在仓库根目录运行：
 
     ```bash
     uv run --no-sync pre-commit install
     ```
 
-4. **Set up the environment**:
+4. **设置环境**：
 
     ```bash
     cp backend/.env.example backend/.env
     ```
 
-5. **Run the test suite to verify your setup**:
+5. **运行测试套件验证配置**：
 
     ```bash
     cd backend && uv run --no-sync pytest
     ```
 
-## Configuration
+<a id="configuration"></a>
 
-### Environment Variables
+## 配置
 
-The app reads its configuration from `backend/.env` (see `backend/.env.example` for the full reference). Common variables:
+<a id="environment-variables"></a>
+
+### 环境变量
+
+应用从 `backend/.env` 读取配置，完整参考见 `backend/.env.example`。常用变量如下：
 
 ```env
 # Environment
@@ -258,30 +281,38 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=Change-Me-Now-1!
 ```
 
-See [Environment Variables](../user-guide/configuration/environment-variables.md) for the complete reference.
+完整参考见[环境变量](../user-guide/configuration/environment-variables.md)。
 
-### Using a hosted database instead
+<a id="using-a-hosted-database-instead"></a>
 
-You don't have to run Postgres yourself. Set `DATABASE_URL` and it overrides every `POSTGRES_*` variable above — the local container (or local install) becomes unnecessary:
+### 使用托管数据库
+
+无需自行运行 Postgres。设置 `DATABASE_URL` 后，它会覆盖上面所有 `POSTGRES_*` 变量，本地容器或本地安装就不再必需：
 
 ```env
 DATABASE_URL=postgresql+asyncpg://user:password@host.example.com/dbname?ssl=require
 ```
 
-[Neon](../user-guide/database/neon.md) — serverless Postgres, and a sponsor of this project — is free to start (a permanent free plan, no credit card) and has a step-by-step guide here, including the connection-string conversion asyncpg needs. Any managed Postgres works the same way.
+[Neon](../user-guide/database/neon.md) 是本项目的赞助方，提供无服务器 Postgres，可免费起步，免费方案长期有效且无需信用卡。对应指南包含详细步骤，以及 asyncpg 所需的连接字符串转换。其他托管 Postgres 的使用方式相同。
 
-## Verification
+<a id="verification"></a>
 
-After installing, verify everything works:
+## 验证
 
-1. **API Docs**: <http://localhost:8000/docs>
-2. **Health Check**: `curl http://localhost:8000/health`
-3. **Admin Panel**: <http://localhost:8000/admin>
-4. **Database**: check the app log for "Database connected" / no errors at startup
+安装后检查以下项目：
 
-## Troubleshooting
+1. **API 文档**：<http://localhost:8000/docs>
+2. **健康检查**：`curl http://localhost:8000/health`
+3. **管理后台**：<http://localhost:8000/admin>
+4. **数据库**：检查应用日志中的 `Database connected`，以及启动时是否出现错误。
 
-### Port Already in Use
+<a id="troubleshooting"></a>
+
+## 故障排查
+
+<a id="port-already-in-use"></a>
+
+### 端口已被占用
 
 ```bash
 # Find what's on port 8000
@@ -289,7 +320,9 @@ lsof -i :8000
 kill -9 <PID>
 ```
 
-### Database Connection Error
+<a id="database-connection-error"></a>
+
+### 数据库连接错误
 
 ```bash
 # Linux
@@ -300,7 +333,9 @@ sudo systemctl restart postgresql
 brew services restart postgresql
 ```
 
-### Redis Connection Error
+<a id="redis-connection-error"></a>
+
+### Redis 连接错误
 
 ```bash
 redis-cli ping  # should print PONG
@@ -308,9 +343,12 @@ redis-cli ping  # should print PONG
 redis-server
 ```
 
-### Docker — Clean Reset
+<a id="docker-clean-reset"></a>
+<a id="docker--clean-reset"></a>
 
-From the repository root, where `docker-compose.yml` is:
+### Docker：清理并重建
+
+在 `docker-compose.yml` 所在的仓库根目录执行：
 
 ```bash
 docker compose down       # stop containers
@@ -319,13 +357,17 @@ docker compose build --no-cache
 docker compose up
 ```
 
-## Next Steps
+<a id="next-steps"></a>
 
-1. **[Configuration Guide](configuration.md)** - Set up your environment
-2. **[First Run](first-run.md)** - Test your installation
-3. **[Project Structure](../user-guide/project-structure.md)** - Understand the codebase
+## 后续步骤
 
-## Need Help?
+1. **[配置指南](configuration.md)**：配置运行环境。
+2. **[首次运行](first-run.md)**：测试安装结果。
+3. **[项目结构](../user-guide/project-structure.md)**：了解代码库。
 
-- Check the [GitHub Issues](https://github.com/benavlabs/fastapi-boilerplate/issues) for known problems
-- Open a [new issue](https://github.com/benavlabs/fastapi-boilerplate/issues/new) with details
+<a id="need-help"></a>
+
+## 获取帮助
+
+- 在 [GitHub Issues](https://github.com/benavlabs/fastapi-boilerplate/issues) 查找已知问题。
+- 创建[新 Issue](https://github.com/benavlabs/fastapi-boilerplate/issues/new)，提供详细信息。

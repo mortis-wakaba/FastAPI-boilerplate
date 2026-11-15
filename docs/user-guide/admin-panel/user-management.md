@@ -1,12 +1,16 @@
-# Admin User Management
+<a id="admin-user-management"></a>
 
-Admin authentication in this boilerplate is intentionally simple: a single admin user defined by environment variables, gated by `SECRET_KEY`-encrypted Starlette sessions. There's no admin user table, no multi-operator flow out of the box.
+# 后台用户管理
 
-This page covers the trade-offs, hardening options, and what to do if you need something more sophisticated.
+后台认证有意保持简单：环境变量定义一个管理员，使用 Starlette 会话 Cookie，没有管理员表或现成多操作员流程。本页介绍取舍、加固和扩展。
 
-## How It Works
+> 译注：原文称 Cookie 被 `SECRET_KEY` 加密，但配置专章说明实际为签名，内容可读。
 
-The admin login (`interfaces/admin/auth.py`) compares submitted credentials against `ADMIN_USERNAME` and `ADMIN_PASSWORD`:
+<a id="how-it-works"></a>
+
+## 工作方式
+
+`interfaces/admin/auth.py` 比较提交值与 `ADMIN_USERNAME`、`ADMIN_PASSWORD`：
 
 ```python
 class AdminAuth(AuthenticationBackend):
@@ -22,13 +26,13 @@ class AdminAuth(AuthenticationBackend):
         return False
 ```
 
-On success, `admin_authenticated=True` is stored in a `SECRET_KEY`-encrypted Starlette session cookie. Subsequent requests check that flag.
+成功后在 Starlette 会话中设置 `admin_authenticated=True`，后续请求检查。没有管理员模型、独立密码哈希列或管理员表，凭据来自环境。
 
-There is no admin user model, no admin password hashing, no admin user table — credentials live in the environment.
+<a id="initial-setup"></a>
 
-## Initial Setup
+## 初始配置
 
-In `backend/.env`:
+在 `backend/.env`：
 
 ```env
 ADMIN_USERNAME=admin
@@ -36,81 +40,95 @@ ADMIN_PASSWORD=Change-Me-Now-1!
 SECRET_KEY=<openssl rand -hex 32>
 ```
 
-Restart the app, navigate to <http://localhost:8000/admin>, and log in.
+重启后访问 <http://localhost:8000/admin> 登录。
 
-The same `ADMIN_*` env vars are also read by `scripts/setup_initial_data.py` to bootstrap the **first application superuser**, but the two systems are otherwise unrelated. See the next section for the distinction.
+同一组 `ADMIN_*` 也被 `scripts/setup_initial_data.py` 用于创建**首个应用超级用户**，除此之外两个系统独立。
 
-## Two Separate User Systems
+<a id="two-separate-user-systems"></a>
 
-The boilerplate maintains two completely separate concepts of "user". Don't confuse them.
+## 两套独立用户系统
 
-| | Admin login | Application users |
-|---|---|---|
-| **Identifies** | An operator of the SQLAdmin panel | Your app's end users |
-| **Storage** | Environment variables | Database (`user` table) |
-| **Auth method** | Plaintext compare against `ADMIN_PASSWORD` | bcrypt-hashed password verified by sessions |
-| **Multiple accounts?** | No (single `ADMIN_USERNAME`) | Yes (one row per user) |
-| **Used by** | `/admin` only | `/api/v1/*` and `/admin` (the User model itself) |
-| **Login URL** | `/admin/login` | `/api/v1/auth/login` |
+| 项目 | 后台登录 | 应用用户 |
+|------|----------|----------|
+| 身份 | SQLAdmin 操作员 | 应用终端用户 |
+| 存储 | 环境变量 | 数据库 `user` 表 |
+| 认证 | 与 `ADMIN_PASSWORD` 比较 | 验证 bcrypt 密码后创建会话 |
+| 多账户 | 不支持，仅一个用户名 | 每用户一行 |
+| 使用位置 | 仅 `/admin` | `/api/v1/*`，以及后台展示用户模型 |
+| 登录 URL | `/admin/login` | `/api/v1/auth/login` |
 
-A user with `is_superuser=true` in the application database can call superuser-only API endpoints (e.g. `DELETE /api/v1/users/db/{username}`). They **cannot** log into the admin panel unless their credentials happen to match `ADMIN_USERNAME` / `ADMIN_PASSWORD`. The two systems don't share state.
+数据库 `is_superuser=true` 可调用超级用户 API，如匿名化接口，但除非凭据恰好匹配环境值，否则不能登录后台，两者不共享认证状态。
 
-## Managing Application Users via the Admin
+<a id="managing-application-users-via-the-admin"></a>
 
-Once logged in to `/admin`:
+## 通过后台管理应用用户
 
-- **Users** view: create / edit / delete application users (goes against the `user` table)
-- **Tiers** view: assign tiers, edit names and descriptions
-- Password fields go through `on_model_change` for automatic hashing
-- Toggle `is_superuser` directly in the edit form
+登录 `/admin` 后：
 
-The `/admin` panel is the easiest way to grant superuser status to an existing application user.
+- **Users** 创建、编辑、删除 `user` 表记录。
+- **Tiers** 管理等级及名称、描述。
+- 密码通过 `on_model_change` 自动哈希。
+- 编辑表单可直接修改 `is_superuser`。
 
-## Hardening for Production
+这是为已有用户授予超级用户身份的简便方式。
 
-### Option 1: Disable in Production
+<a id="hardening-for-production"></a>
 
-The simplest move: don't expose the admin panel at all in production.
+## 生产加固
+
+<a id="option-1-disable-in-production"></a>
+
+### 方案一：禁用
+
+不在生产暴露后台：
 
 ```env
 ADMIN_ENABLED=false
 ```
 
-`create_admin_interface()` short-circuits when this is false, and nothing is mounted. Run admin tasks via scripts or DB tools instead.
+`create_admin_interface()` 提前返回，不挂载路由。管理操作使用脚本或数据库工具。
 
-### Option 2: Network-Restrict the Path
+<a id="option-2-network-restrict-the-path"></a>
 
-Keep `ADMIN_ENABLED=true` but allow `/admin/*` only from your VPN or office IP range at the load balancer / reverse proxy. The app stays the same; the network blocks public access.
+### 方案二：网络限制
 
-This is usually the right call when you need occasional access without baking new admin code paths.
+保持启用，在负载均衡或反向代理仅允许 VPN / 办公网段访问 `/admin/*`。应用不变，网络阻止公网访问，适合偶尔使用且不想新增认证逻辑的情况。
 
-### Option 3: Strong Credentials + TLS
+<a id="option-3-strong-credentials-tls"></a>
+<a id="option-3-strong-credentials--tls"></a>
 
-If you need `/admin` reachable from the internet:
+### 方案三：强凭据与 TLS
 
-- Generate a long, high-entropy `ADMIN_PASSWORD` and pull it from a secrets manager at deploy time
-- Use HTTPS (terminate at your proxy)
-- Enable secure cookies if you serve over HTTPS — see [Configuration](configuration.md#session-cookies)
-- Rotate the password periodically (requires a deploy)
+必须开放互联网时：
 
-The production security validator (`infrastructure/security/`) refuses to start the app if the admin panel is enabled without `ADMIN_USERNAME` and `ADMIN_PASSWORD`, and logs warnings for predictable usernames and short or common passwords. It can't tell how strong a password really is, so that part is still on you.
+- 使用长高熵 `ADMIN_PASSWORD`，部署时从密钥管理器获取。
+- 代理终止 HTTPS。
+- HTTPS 使用安全 Cookie，见[配置](configuration.md#session-cookies)。
+- 定期轮换密码，需要重新部署。
 
-## Recovering from a Lost Admin Password
+生产校验器拒绝后台启用却缺少用户名密码的配置，对可预测用户名、短或常见密码告警，但不能完整判断强度。
 
-Since admin credentials are env vars, recovery is mechanical:
+<a id="recovering-from-a-lost-admin-password"></a>
 
-1. Edit `backend/.env` (or your secrets manager / orchestrator config) to set new `ADMIN_USERNAME` / `ADMIN_PASSWORD`
-2. Restart the app
+## 管理员密码遗失
 
-There's no database row to fix. There's no email-based reset flow either — these credentials aren't meant to be self-service.
+1. 修改 `backend/.env`、密钥管理器或编排配置中的 `ADMIN_USERNAME` / `ADMIN_PASSWORD`。
+2. 重启应用。
 
-## When You Need Multiple Admins
+无需修复数据库，也没有邮件重置，因为它不属于用户自助凭据。
 
-The single-credential design works for small teams or solo deployments. If you need real multi-operator admin auth, you have a few options:
+<a id="when-you-need-multiple-admins"></a>
 
-### Option A: Use Application Superusers + a Dedicated Admin Route
+## 多管理员需求
 
-Skip the SQLAdmin login entirely. Restrict `/admin` access to authenticated app users with `is_superuser=true` by writing a custom `AuthenticationBackend`:
+单凭据适合个人或小团队，需要真实多操作员时可选：
+
+<a id="option-a-use-application-superusers-a-dedicated-admin-route"></a>
+<a id="option-a-use-application-superusers--a-dedicated-admin-route"></a>
+
+### A：使用应用超级用户
+
+自定义 `AuthenticationBackend`，仅允许已认证且 `is_superuser=true` 的应用用户进入后台：
 
 ```python
 # interfaces/admin/auth.py
@@ -129,24 +147,31 @@ class AdminAuth(AuthenticationBackend):
         ...
 ```
 
-Trade-offs: now any app superuser can log in. You also need to think about CSRF (the app uses double-submit; SQLAdmin posts forms separately).
+代价是所有应用超级用户均可登录，且需要考虑 CSRF：应用采用双重提交，而 SQLAdmin 单独提交表单。
 
-### Option B: Add an `AdminUser` Model
+<a id="option-b-add-an-adminuser-model"></a>
 
-Build a small model (`AdminUser` with `username`, `hashed_password`, `is_active`) and override `AdminAuth.login` to query it. Add a one-off script to seed admin users.
+### B：新增 `AdminUser` 模型
 
-### Option C: External Auth (OIDC / SAML)
+包含 `username`、`hashed_password`、`is_active`，覆盖 `AdminAuth.login` 查询，提供一次性脚本初始化。
 
-For larger orgs, mount the admin behind an SSO proxy (Authelia, Pomerium, AWS ALB with Cognito). The admin app trusts the proxy's authentication header and grants access on its presence.
+<a id="option-c-external-auth-oidc-saml"></a>
+<a id="option-c-external-auth-oidc--saml"></a>
 
-None of these are wired up in the boilerplate — pick the one that fits your environment and implement it. The SQLAdmin docs cover [Authentication](https://github.com/smithyhq/sqladmin) extensions in detail.
+### C：外部认证（OIDC / SAML）
 
-## Auditing Admin Activity
+大型组织可把后台放在 Authelia、Pomerium、AWS ALB + Cognito 等 SSO 代理后，后台信任代理提供的认证头。
 
-The admin panel doesn't log every action by default. If you need an audit trail:
+这些方案都未内置，应按环境实现。扩展参考 [SQLAdmin 认证文档](https://github.com/smithyhq/sqladmin)。
 
-- The boilerplate's logging infrastructure (`infrastructure/logging/`) gives you correlation IDs out of the box. SQLAdmin requests pass through it like any other.
-- Override `on_model_change` / `after_model_change` / `delete_model` in your views to log explicitly:
+<a id="auditing-admin-activity"></a>
+
+## 审计后台活动
+
+默认不记录每项后台操作，需要审计时：
+
+- 使用已有日志与关联 ID，SQLAdmin 请求也经过相同链路。
+- 覆盖视图的 `on_model_change`、`after_model_change`、`delete_model` 显式记录：
 
 ```python
 from src.infrastructure.logging import get_logger
@@ -160,20 +185,24 @@ class UserAdmin(DataclassModelMixin, ModelView, model=User):
         logger.info(f"Admin {action} user", extra={"user_id": data.get("id"), "actor": "admin"})
 ```
 
-For richer auditing, write to a dedicated log stream or push events to a SIEM.
+更完整的审计可写独立日志流或 SIEM。
 
-## Key Files
+<a id="key-files"></a>
 
-| Component | Location |
-|-----------|----------|
-| Admin auth backend | `backend/src/interfaces/admin/auth.py` |
-| Admin app factory | `backend/src/interfaces/admin/initialize.py` |
-| Settings classes | `backend/src/infrastructure/config/settings.py` (`AdminSettings`, `SQLAdminSettings`) |
-| Initial data script | `backend/scripts/setup_initial_data.py` |
+## 关键文件
 
-## Next Steps
+| 组件 | 位置 |
+|------|------|
+| 认证后端 | `backend/src/interfaces/admin/auth.py` |
+| 应用工厂 | `backend/src/interfaces/admin/initialize.py` |
+| 配置类 | `backend/src/infrastructure/config/settings.py` 的 `AdminSettings`、`SQLAdminSettings` |
+| 初始数据脚本 | `backend/scripts/setup_initial_data.py` |
 
-- **[Configuration](configuration.md)** — Environment variables and cookie behavior
-- **[Adding Models](adding-models.md)** — Register your own admin views
-- **[Permissions](../authentication/permissions.md)** — Role permissions and application-level superuser checks
-- **[Production](../production.md)** — Production hardening checklist
+<a id="next-steps"></a>
+
+## 后续步骤
+
+- **[配置](configuration.md)**：环境变量和 Cookie。
+- **[添加模型](adding-models.md)**：注册视图。
+- **[权限](../authentication/permissions.md)**：应用角色与超级用户。
+- **[生产环境](../production.md)**：加固清单。

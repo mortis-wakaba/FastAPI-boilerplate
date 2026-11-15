@@ -1,38 +1,46 @@
-# Environment-Specific Configuration
+<a id="environment-specific-configuration"></a>
 
-The boilerplate adapts its behavior based on the `ENVIRONMENT` variable. This page covers the recommended settings for each environment and the behaviors the codebase already changes for you.
+# 分环境配置
 
-## Supported Environments
+模板根据 `ENVIRONMENT` 调整行为。本页介绍各环境的推荐设置，以及代码已自动完成的调整。
+
+<a id="supported-environments"></a>
+
+## 支持的环境
 
 ```env
 # Options: production, staging, development, local
 ENVIRONMENT=development
 ```
 
-| Value | Intended Use |
-|-------|--------------|
-| `development` | Local dev with verbose logging and DEBUG-level output |
-| `local` | Equivalent to `development` for default config (used by tests / CI) |
-| `staging` | Pre-production testing — structured logs, INFO level, part of the security validator |
-| `production` | Live deployment — JSON logs, security validator on, docs gated |
+| 值 | 用途 |
+|----|------|
+| `development` | 本地开发，详细日志和 DEBUG 级别输出 |
+| `local` | 默认配置与 development 相同，用于测试和 CI |
+| `staging` | 预生产测试，结构化日志、INFO 级别、部分安全校验 |
+| `production` | 线上部署，JSON 日志、启用安全校验、受控开放文档 |
 
-## What the Codebase Does for You
+<a id="what-the-codebase-does-for-you"></a>
 
-The boilerplate already changes its own behavior based on `ENVIRONMENT`. You don't need to write conditional code for these:
+## 模板自动调整的行为
 
-| Behavior | development / local | staging | production |
-|----------|---------------------|---------|------------|
-| **Logging style** | Detailed text, color console | Structured key/value | JSON |
-| **Default log level** | DEBUG (when `LOG_DEVELOPMENT_VERBOSE=true`) | INFO | WARNING (when `LOG_PRODUCTION_OPTIMIZE=true`) |
-| **Noisy library loggers** | Normal level | Normal level | Quieted (urllib3, sqlalchemy, redis, etc.) |
-| **Security validator** | Skipped | The secret key, the mail backend and `CREATE_TABLES_ON_STARTUP` | Every check, at startup, if `PRODUCTION_SECURITY_VALIDATION_ENABLED=true` (default) |
-| **Docs at `/docs`** | Available | Available | Disabled unless `ENABLE_DOCS_IN_PRODUCTION=true` |
+以下行为已根据 `ENVIRONMENT` 切换，无需另外编写条件逻辑：
 
-The logging behavior is driven by `src/infrastructure/logging/config.py`. The security validator lives in `src/infrastructure/security/`.
+| 行为 | development / local | staging | production |
+|------|---------------------|---------|------------|
+| **日志样式** | 详细文本、彩色控制台 | 结构化键值 | JSON |
+| **默认日志级别** | `LOG_DEVELOPMENT_VERBOSE=true` 时为 DEBUG | INFO | `LOG_PRODUCTION_OPTIMIZE=true` 时为 WARNING |
+| **噪声较多的库日志** | 正常级别 | 正常级别 | 降低 urllib3、sqlalchemy、redis 等日志量 |
+| **安全校验** | 跳过 | 检查密钥、邮件后端和 `CREATE_TABLES_ON_STARTUP` | `PRODUCTION_SECURITY_VALIDATION_ENABLED=true`（默认）时，启动执行全部检查 |
+| **`/docs` 文档** | 可用 | 可用 | 除非 `ENABLE_DOCS_IN_PRODUCTION=true`，否则关闭 |
 
-## Development
+日志行为由 `src/infrastructure/logging/config.py` 控制，安全校验器位于 `src/infrastructure/security/`。
 
-For day-to-day local development.
+<a id="development"></a>
+
+## 开发环境
+
+适用于日常本地开发。
 
 ```env
 ENVIRONMENT=development
@@ -75,12 +83,14 @@ ADMIN_PASSWORD=admin123
 LOG_DEVELOPMENT_VERBOSE=true   # gives you DEBUG-level console output
 ```
 
-!!! tip "Why disable CSRF in dev?"
-    The session cookie is HTTP-only and a CSRF token is also returned. Browser-based clients should send both. For curl/Postman testing, setting `CSRF_ENABLED=false` removes one moving piece. Re-enable it when testing the real frontend flow.
+!!! tip "为什么开发时关闭 CSRF？"
+    会话 Cookie 是 HttpOnly，响应还会返回 CSRF 令牌。浏览器客户端应同时携带两者；使用 curl / Postman 测试时，`CSRF_ENABLED=false` 可简化流程。测试真实前端流程时应重新启用。
 
-## Staging
+<a id="staging"></a>
 
-A pre-production rehearsal — same code paths as production, separate data, useful for catching environment-specific issues.
+## 预发布环境
+
+生产前的演练环境：使用与生产相同的代码路径和独立数据，用于发现特定环境问题。
 
 ```env
 ENVIRONMENT=staging
@@ -128,9 +138,11 @@ LOG_FILE_ENABLED=true
 LOG_FILE_PATH=logs/app.log
 ```
 
-## Production
+<a id="production"></a>
 
-Live traffic. Treat every setting as security-relevant.
+## 生产环境
+
+处理真实流量，每项设置都应从安全角度审视。
 
 ```env
 ENVIRONMENT=production
@@ -197,12 +209,14 @@ LOG_FILE_ENABLED=true
 LOG_FILE_PATH=/var/log/app/app.log
 ```
 
-!!! danger "Production Security Validator"
-    With `ENVIRONMENT=production` and `PRODUCTION_SECURITY_VALIDATION_ENABLED=true` (both default), the app refuses to start if it finds insecure settings — e.g. the placeholder `SECRET_KEY`, default database credentials, an admin panel without credentials, or `CORS_ORIGINS=*`.
+!!! danger "生产安全校验器"
+    当 `ENVIRONMENT=production` 且 `PRODUCTION_SECURITY_VALIDATION_ENABLED=true` 时，应用发现不安全配置会拒绝启动，例如占位 `SECRET_KEY`、默认数据库凭据、后台缺少凭据或 `CORS_ORIGINS=*`。原文在此将两项均称为默认值。
 
-## Detecting the Environment in Code
+<a id="detecting-the-environment-in-code"></a>
 
-`src/infrastructure/config/enums.py` defines `EnvironmentOption` so you don't have to compare against magic strings:
+## 在代码中检测环境
+
+`src/infrastructure/config/enums.py` 定义了 `EnvironmentOption`，避免直接比较魔法字符串：
 
 ```python
 from src.infrastructure.config.settings import EnvironmentOption, get_settings
@@ -214,27 +228,33 @@ if settings.ENVIRONMENT == EnvironmentOption.PRODUCTION:
     ...
 ```
 
-For helpers, add small properties to your own settings class — but for most cases the above is enough. Avoid scattering environment branches in business logic; keep them at startup or in middleware.
+如需辅助方法，可在配置类中添加小型属性，但大多数情况上述方式已足够。避免在业务逻辑中分散环境分支，尽量集中在启动或中间件中。
 
-## Managing Multiple Environments
+<a id="managing-multiple-environments"></a>
 
-### One `.env` per environment
+## 管理多个环境
 
-The simplest approach. Keep `.env.development`, `.env.staging`, `.env.production` *outside* version control (e.g. in a secrets manager) and symlink the active one:
+<a id="one-env-per-environment"></a>
+
+### 每个环境一个 `.env`
+
+最简单的方式：把 `.env.development`、`.env.staging`、`.env.production` 保存在版本控制之外，如密钥管理器中，并为当前环境创建符号链接：
 
 ```bash
 # Switch environments locally
 ln -sf .env.staging backend/.env
 ```
 
-For staging/production you'd more typically:
+预发布和生产环境更常见的做法是：
 
-- Pull secrets from a manager (AWS Secrets Manager, Vault, Doppler, 1Password) at deploy time
-- Render the `.env` file from CI, or set env vars directly on the runtime (Kubernetes, ECS, systemd unit, etc.)
+- 部署时从 AWS Secrets Manager、Vault、Doppler 或 1Password 获取密钥。
+- 在 CI 中生成 `.env`，或直接在 Kubernetes、ECS、systemd 等运行环境设置变量。
 
-### Docker Compose Overrides
+<a id="docker-compose-overrides"></a>
 
-For Compose, use overlay files:
+### Docker Compose 覆盖配置
+
+Compose 使用叠加文件：
 
 ```bash
 # Development: docker-compose.yml + docker-compose.override.yml (auto-loaded)
@@ -247,11 +267,13 @@ docker compose -f docker-compose.yml -f docker-compose.staging.yml up
 docker compose -f docker-compose.yml -f docker-compose.production.yml up
 ```
 
-The override files only need to specify what *changes* (target stage, removed dev volumes, scaling, secrets), not the full service definition.
+覆盖文件只描述变化，如目标构建阶段、移除开发卷、扩容和密钥，无需复制完整服务定义。
 
-## Validating Configuration
+<a id="validating-configuration"></a>
 
-Run a quick check that the app reads what you think:
+## 验证配置
+
+快速确认应用读取了预期配置：
 
 ```bash
 cd backend
@@ -268,33 +290,46 @@ print(f'sessions  : secure={s.SESSION_SECURE_COOKIES} csrf={s.CSRF_ENABLED}')
 "
 ```
 
-For production deployment specifically, the security validator runs at startup — if it fails, the app exits before binding the port. That's the strongest signal.
+生产安全校验器在启动时运行，失败则在绑定端口前退出，这是最直接的配置信号。
 
-## Best Practices
+<a id="best-practices"></a>
 
-### Security
-- Generate a fresh `SECRET_KEY` per environment (never reuse)
-- Pull secrets from a manager, not files committed to git
-- Always set `SESSION_SECURE_COOKIES=true` outside development
-- Restrict `CORS_ORIGINS` to your real domains in staging/production
-- Set Redis passwords for staging/production
-- Leave `PRODUCTION_SECURITY_VALIDATION_ENABLED=true` in production
+## 最佳实践
 
-### Performance
-- Use Redis (not Memcached) when you need persistence or multi-DB separation
-- Set distinct Redis DB numbers for cache/rate-limit/taskiq (defaults 0/1/3)
-- Tune `POSTGRES_POOL_SIZE` for your workload (default 20)
-- Raise taskiq's `--max-async-tasks` if jobs are I/O-bound
+<a id="security"></a>
 
-### Operations
-- Keep environment-specific values in your secrets manager, not env files
-- Document any custom env vars you add in `.env.example`
-- Test deployments in staging before production
-- Monitor the logs at startup — the security validator will tell you what's wrong
+### 安全
 
-## See Also
+- 每个环境生成独立 `SECRET_KEY`，不重复使用。
+- 从密钥管理器获取密钥，不从提交到 Git 的文件读取。
+- 开发环境之外始终设置 `SESSION_SECURE_COOKIES=true`。
+- 预发布和生产环境的 `CORS_ORIGINS` 限定为真实域名。
+- 为预发布和生产 Redis 设置密码。
+- 生产环境保持 `PRODUCTION_SECURITY_VALIDATION_ENABLED=true`。
 
-- **[Environment Variables](environment-variables.md)** — Complete reference of every variable
-- **[Settings Classes](settings-classes.md)** — How variables become Python settings
-- **[Docker Setup](docker-setup.md)** — Compose configuration per environment
-- **[Production](../production.md)** — Production deployment guide
+<a id="performance"></a>
+
+### 性能
+
+- 需要持久化或多 DB 隔离时使用 Redis，而非 Memcached。
+- 缓存、限流和 Taskiq 使用不同 Redis DB，默认为 0 / 1 / 3。
+- 按负载调整 `POSTGRES_POOL_SIZE`，默认 20。
+- I/O 密集任务可提高 Taskiq 的 `--max-async-tasks`。
+
+<a id="operations"></a>
+
+### 运维
+
+- 环境专属值保存在密钥管理器中，而非环境文件。
+- 在 `.env.example` 记录新增自定义变量。
+- 生产前先在预发布环境测试部署。
+- 关注启动日志，安全校验器会指出问题。
+
+<a id="see-also"></a>
+
+## 另请参阅
+
+- **[环境变量](environment-variables.md)**：全部变量参考。
+- **[配置类](settings-classes.md)**：变量如何转为 Python 配置。
+- **[Docker 配置](docker-setup.md)**：各环境的 Compose 配置。
+- **[生产环境](../production.md)**：生产部署指南。

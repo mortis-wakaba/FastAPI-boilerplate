@@ -1,21 +1,27 @@
-# Environment Variables Reference
+<a id="environment-variables-reference"></a>
 
-This page is the complete reference for every environment variable the boilerplate reads. `backend/.env.example` ships the ones a new project usually sets, with the same defaults; the rest are here, and a variable a project never sets keeps the default named below.
+# 环境变量参考
 
-All variables are loaded from `backend/.env` at application startup via Pydantic `BaseSettings` classes in `src/infrastructure/config/settings.py`.
+本页列出模板读取的全部环境变量。`backend/.env.example` 提供新项目通常需要设置的变量，默认值与此处一致；其余变量在本页说明。未显式设置的变量使用下文默认值。
 
-## Environment
+应用启动时，通过 `src/infrastructure/config/settings.py` 中的 Pydantic `BaseSettings` 类从 `backend/.env` 加载变量。
+
+<a id="environment"></a>
+
+## 环境
 
 ```env
 # Options: development, staging, production, local
 ENVIRONMENT=development
 ```
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `ENVIRONMENT` | `development` | Drives logging style, docs visibility, and security validation. See [Environment-Specific](environment-specific.md). |
+| 变量 | 默认值 | 用途 |
+|------|--------|------|
+| `ENVIRONMENT` | `development` | 控制日志样式、文档可见性和安全校验，见[分环境配置](environment-specific.md) |
 
-## Database
+<a id="database"></a>
+
+## 数据库
 
 ```env
 POSTGRES_USER=postgres
@@ -27,29 +33,31 @@ POSTGRES_ASYNC_PREFIX=postgresql+asyncpg://
 CREATE_TABLES_ON_STARTUP=true   # on by default in local and development only
 ```
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `POSTGRES_USER` | `postgres` | Database user |
-| `POSTGRES_PASSWORD` | `postgres` | Database password |
-| `POSTGRES_DB` | `postgres` | Database name |
-| `POSTGRES_SERVER` | `localhost` | Hostname (use `postgres`, the Compose service name) |
-| `POSTGRES_PORT` | `5432` | TCP port |
-| `POSTGRES_ASYNC_PREFIX` | `postgresql+asyncpg://` | Driver prefix for async code (the app) |
-| `CREATE_TABLES_ON_STARTUP` | `true` in local and development, `false` otherwise | Auto-create tables from models on startup; production refuses `true` |
-| `POSTGRES_POOL_SIZE` | `20` | SQLAlchemy connection pool size |
-| `POSTGRES_MAX_OVERFLOW` | `0` | Pool overflow connections |
-| `POSTGRES_POOL_PRE_PING` | `true` | Test a pooled connection before use, replacing ones the server has dropped |
-| `POSTGRES_POOL_RECYCLE` | `-1` | Discard connections older than N seconds (`-1` disables) |
+| 变量 | 默认值 | 用途 |
+|------|--------|------|
+| `POSTGRES_USER` | `postgres` | 数据库用户 |
+| `POSTGRES_PASSWORD` | `postgres` | 数据库密码 |
+| `POSTGRES_DB` | `postgres` | 数据库名 |
+| `POSTGRES_SERVER` | `localhost` | 主机名，Compose 中使用服务名 `postgres` |
+| `POSTGRES_PORT` | `5432` | TCP 端口 |
+| `POSTGRES_ASYNC_PREFIX` | `postgresql+asyncpg://` | 应用异步代码的驱动前缀 |
+| `CREATE_TABLES_ON_STARTUP` | local 和 development 为 `true`，其他为 `false` | 启动时按模型建表，生产环境拒绝 `true` |
+| `POSTGRES_POOL_SIZE` | `20` | SQLAlchemy 连接池大小 |
+| `POSTGRES_MAX_OVERFLOW` | `0` | 连接池允许的额外连接数 |
+| `POSTGRES_POOL_PRE_PING` | `true` | 使用池内连接前检查，替换已被服务端关闭的连接 |
+| `POSTGRES_POOL_RECYCLE` | `-1` | 丢弃存在超过指定秒数的连接，`-1` 表示禁用 |
 
-If you set `DATABASE_URL` directly, it overrides the constructed URL — use it whenever the connection needs more than host/port/credentials, such as a managed provider that requires TLS:
+直接设置 `DATABASE_URL` 会覆盖自动构造的 URL。需要主机、端口和凭据之外的选项，例如托管数据库要求 TLS 时，应使用它：
 
 ```env
 DATABASE_URL=postgresql+asyncpg://user:password@host.example.com/dbname?ssl=require
 ```
 
-The URL must use the `postgresql+asyncpg://` prefix, and query parameters are passed to `asyncpg` (which spells TLS `ssl=require`, not libpq's `sslmode=require`). The [production validator](../production.md#the-production-validator) reads the credentials out of the URL, so the `POSTGRES_*` variables can keep their defaults. See [Neon](../database/neon.md) for a full walkthrough with a serverless provider.
+URL 必须使用 `postgresql+asyncpg://` 前缀，查询参数会传给 `asyncpg`，其 TLS 参数是 `ssl=require`，不是 libpq 的 `sslmode=require`。[生产校验器](../production.md#the-production-validator)从 URL 提取凭据，因此 `POSTGRES_*` 可以保持默认值。无服务器数据库的完整示例见 [Neon](../database/neon.md)。
 
-## Cache
+<a id="cache"></a>
+
+## 缓存
 
 ```env
 CACHE_ENABLED=true
@@ -60,7 +68,9 @@ CLIENT_CACHE_ENABLED=true
 CLIENT_CACHE_MAX_AGE=60
 ```
 
-### Redis backend
+<a id="redis-backend"></a>
+
+### Redis 后端
 
 ```env
 CACHE_REDIS_HOST=redis        # use "localhost" without Docker
@@ -71,7 +81,9 @@ CACHE_REDIS_CONNECT_TIMEOUT=5
 CACHE_REDIS_POOL_SIZE=10
 ```
 
-### Memcached backend
+<a id="memcached-backend"></a>
+
+### Memcached 后端
 
 ```env
 CACHE_MEMCACHED_HOST=localhost
@@ -80,10 +92,11 @@ CACHE_MEMCACHED_POOL_SIZE=10
 CACHE_MEMCACHED_CONNECT_TIMEOUT=5
 ```
 
-## Rate Limiting
+<a id="rate-limiting"></a>
 
-Provided by `crudauth`, on Redis or in memory. Limits are resolved per request from
-the user's tier and path, falling back to the defaults below, and each path keeps its own counter.
+## 限流
+
+由 `crudauth` 提供，使用 Redis 或内存。每个请求根据用户等级和路径解析限制，找不到规则则使用以下默认值。各路径独立计数。
 
 ```env
 RATE_LIMITER_ENABLED=true
@@ -92,7 +105,9 @@ DEFAULT_RATE_LIMIT_LIMIT=100
 DEFAULT_RATE_LIMIT_PERIOD=60
 ```
 
-### Redis backend
+<a id="redis-backend_1"></a>
+
+### Redis 后端
 
 ```env
 RATE_LIMITER_REDIS_HOST=redis
@@ -103,7 +118,9 @@ RATE_LIMITER_REDIS_CONNECT_TIMEOUT=5
 RATE_LIMITER_REDIS_POOL_SIZE=10
 ```
 
-## Email
+<a id="email"></a>
+
+## 邮件
 
 ```env
 EMAIL_BACKEND=console           # or "smtp"
@@ -112,12 +129,14 @@ EMAIL_FROM_NAME=
 FRONTEND_URL=http://localhost:3000
 ```
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `EMAIL_BACKEND` | `console` | `console` logs each message and sends nothing; `smtp` delivers. Production refuses `console` |
-| `EMAIL_FROM` | `no-reply@localhost` | The address the account emails come from |
-| `EMAIL_FROM_NAME` | empty | The display name beside it |
-| `FRONTEND_URL` | `http://localhost:3000` | Your frontend, which the recovery links point at. Production refuses an empty or `localhost` value |
+| 变量 | 默认值 | 用途 |
+|------|--------|------|
+| `EMAIL_BACKEND` | `console` | `console` 只记录邮件而不发送，`smtp` 实际投递；生产环境拒绝 `console` |
+| `EMAIL_FROM` | `no-reply@localhost` | 账户邮件的发件地址 |
+| `EMAIL_FROM_NAME` | 空 | 发件人显示名称 |
+| `FRONTEND_URL` | `http://localhost:3000` | 找回链接指向的前端地址；生产环境拒绝空值和 `localhost` |
+
+<a id="smtp"></a>
 
 ### SMTP
 
@@ -130,16 +149,13 @@ EMAIL_SMTP_STARTTLS=true
 EMAIL_SMTP_TIMEOUT_SECONDS=10
 ```
 
-`EMAIL_BACKEND=smtp` with no `EMAIL_SMTP_HOST` is refused by name when the sender is built.
-`EMAIL_SMTP_STARTTLS` verifies the server's certificate and hostname, so a server presenting a
-self-signed certificate is refused rather than trusted; turn it off only for a relay on a network
-you own. With the taskiq feature present, delivery is enqueued as the `email:send` task and a worker
-does the sending, so no request waits on the mail server. Where the broker cannot be reached, the
-message is delivered from the task the sender handed it to rather than lost, and still not in the
-request: a recovery route that waited for mail only when the address existed would say which
-addresses do.
+`EMAIL_BACKEND=smtp` 但未设置 `EMAIL_SMTP_HOST` 时，构造发送器会明确报错。`EMAIL_SMTP_STARTTLS` 校验服务器证书和主机名，因此拒绝自签名证书；只应在自己控制的网络中、连接可信中继时关闭。
 
-## Background Tasks (Taskiq)
+启用 Taskiq 功能后，邮件通过 `email:send` 任务入队，由 Worker 发送，请求无需等待邮件服务器。消息代理不可达时，由发送器移交的任务直接投递邮件，避免丢失，仍不阻塞请求。找回接口如果仅在地址存在时等待邮件，就会泄露哪些地址已注册。
+
+<a id="background-tasks-taskiq"></a>
+
+## 后台任务（Taskiq）
 
 ```env
 TASKIQ_BROKER_TYPE=redis        # or "rabbitmq"
@@ -147,7 +163,9 @@ TASKIQ_DEFAULT_RETRY_COUNT=3    # runs in all for a task labelled retry_on_error
 TASKIQ_RETRY_DELAY_SECONDS=0    # seconds a retry waits; 0 retries immediately, above 0 needs the scheduler
 ```
 
-### Redis broker
+<a id="redis-broker"></a>
+
+### Redis 消息代理
 
 ```env
 TASKIQ_REDIS_HOST=redis
@@ -156,7 +174,9 @@ TASKIQ_REDIS_DB=3               # separate DB from cache and rate limiter
 TASKIQ_REDIS_PASSWORD=
 ```
 
-### RabbitMQ broker
+<a id="rabbitmq-broker"></a>
+
+### RabbitMQ 消息代理
 
 ```env
 TASKIQ_RABBITMQ_HOST=localhost
@@ -166,7 +186,11 @@ TASKIQ_RABBITMQ_PASSWORD=guest
 TASKIQ_RABBITMQ_VHOST=/
 ```
 
-## Web Server
+<a id="web-server"></a>
+
+## Web 服务
+
+<a id="cors"></a>
 
 ### CORS
 
@@ -178,31 +202,39 @@ CORS_ALLOW_METHODS=*
 CORS_ALLOW_HEADERS=*
 ```
 
-!!! danger "CORS in Production"
-    Never use `*` for `CORS_ORIGINS` in production: any website could call the API from your users' browsers. The app drops `CORS_ALLOW_CREDENTIALS` while `*` is listed, so a page on another origin can't read a response to a call it made with the user's cookies — which is also why a wildcard origin can't serve a logged-in frontend. A simple cross-site request is still delivered, cookie included wherever `SameSite` allows it; the browser only withholds the response. The production security validator refuses to start with it. Specify exact domains:
+!!! danger "生产环境中的 CORS"
+    生产环境的 `CORS_ORIGINS` 不应使用 `*`，否则任意网站都可以从用户浏览器调用 API。存在 `*` 时应用会关闭 `CORS_ALLOW_CREDENTIALS`，使其他来源页面无法读取携带用户 Cookie 的调用响应，因此通配来源也无法支持需要登录的前端。跨站简单请求仍会送达，在 `SameSite` 允许时还会携带 Cookie；浏览器只是阻止读取响应。生产安全校验器会拒绝启动，应指定确切域名：
+
     ```env
     CORS_ORIGINS=https://yourapp.com,https://www.yourapp.com
     CORS_ALLOW_METHODS=GET,POST,PUT,DELETE,PATCH
     CORS_ALLOW_HEADERS=Authorization,Content-Type
     ```
 
-### Compression
+<a id="compression"></a>
+
+### 压缩
 
 ```env
 GZIP_ENABLED=true
 GZIP_MINIMUM_SIZE=1000
 ```
 
-### API Docs
+<a id="api-docs"></a>
+
+### API 文档
 
 ```env
 ENABLE_DOCS_IN_PRODUCTION=false  # serve /docs even when ENVIRONMENT=production (superuser-only)
 OPENAPI_PREFIX=                   # path prefix for the OpenAPI schema
 ```
 
-When docs are served outside development (staging, or production with `ENABLE_DOCS_IN_PRODUCTION=true`), the built-in FastAPI docs routes are not registered — `/docs`, `/redoc`, and `/openapi.json` are only reachable through the app's own routes, which require superuser authentication.
+非开发环境提供文档时，即 staging 或设置了 `ENABLE_DOCS_IN_PRODUCTION=true` 的 production，不注册 FastAPI 内置文档路由。`/docs`、`/redoc` 和 `/openapi.json` 仅通过应用自己的路由提供，并要求超级用户认证。
 
-## Authentication & Security
+<a id="authentication-security"></a>
+<a id="authentication--security"></a>
+
+## 认证与安全
 
 ```env
 SECRET_KEY=insecure-secret-key-change-this-in-production
@@ -215,16 +247,17 @@ PRODUCTION_SECURITY_VALIDATION_ENABLED=true
 SECURITY_HEADERS_ENABLED=true
 ```
 
-Generate a strong key:
+生成强密钥：
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(64))"
 ```
 
-### Password Policy
+<a id="password-policy"></a>
 
-Enforced by crudauth wherever a password is set: registration, a reset and a change. The seed refuses
-an `ADMIN_PASSWORD` these reject, naming what failed.
+### 密码策略
+
+crudauth 在注册、重置和修改密码等所有设置密码的位置执行策略。初始数据脚本会拒绝不符合要求的 `ADMIN_PASSWORD`，并说明失败原因。
 
 ```env
 PASSWORD_MIN_LENGTH=8
@@ -234,7 +267,9 @@ PASSWORD_REQUIRE_DIGIT=true
 PASSWORD_REQUIRE_SPECIAL=true
 ```
 
-### Sessions
+<a id="sessions"></a>
+
+### 会话
 
 ```env
 SESSION_TIMEOUT_MINUTES=30
@@ -261,8 +296,7 @@ TRUSTED_PROXY_HOPS=0
                                     # mounts them; unset asks nothing, and a value below 1 is refused
 ```
 
-A dedicated session Redis is named either as a URL or host by host. `SESSION_REDIS_URL` wins where it
-is set; otherwise these are used with `SESSION_REDIS_DB`:
+专用会话 Redis 可通过 URL 或逐项主机配置指定。设置了 `SESSION_REDIS_URL` 时优先使用它，否则以下变量与 `SESSION_REDIS_DB` 一起使用：
 
 ```env
 SESSION_REDIS_HOST=redis
@@ -270,21 +304,20 @@ SESSION_REDIS_PORT=6379
 SESSION_REDIS_PASSWORD=
 ```
 
-### Forwarded Headers
+<a id="forwarded-headers"></a>
+
+### 转发头
 
 ```env
 # Which peers uvicorn accepts X-Forwarded-For and X-Forwarded-Proto from.
 FORWARDED_ALLOW_IPS=172.31.240.0/24
 ```
 
-`FORWARDED_ALLOW_IPS` is read by **uvicorn**, not by the app, and it decides what `request.client`
-and the access logs report. Because uvicorn reads it from its own process environment, it reaches
-the server through compose's `env_file` (or whatever exports it where uvicorn starts) rather than
-through the app's settings — a value in `backend/.env` only applies if that file is the container's
-`env_file`. `bp deploy generate nginx` writes it for you, set to `--internal-subnet`.
+`FORWARDED_ALLOW_IPS` 由 **uvicorn** 读取，而非应用读取，决定 `request.client` 和访问日志显示的地址。uvicorn 从自身进程环境读取，因此需要通过 Compose 的 `env_file` 或启动环境传入，而不经过应用配置。只有 `backend/.env` 同时也是容器的 `env_file` 时，其中的值才生效。`bp deploy generate nginx` 会生成该配置，值取自 `--internal-subnet`。
 
-Leave it unset when nothing sits in front of the app. A wildcard (`*`) lets any client claim any
-address, and `TRUSTED_PROXY_HOPS` then counts hops in a header the client controls.
+应用前方没有代理时保持未设置。通配符 `*` 允许任意客户端声明任意地址，此时 `TRUSTED_PROXY_HOPS` 统计的是客户端可控请求头中的跳数。
+
+<a id="csrf"></a>
 
 ### CSRF
 
@@ -293,9 +326,15 @@ address, and `TRUSTED_PROXY_HOPS` then counts hops in a header the client contro
 CSRF_ENABLED=true
 ```
 
-### Login Lockout
+<a id="login-lockout"></a>
 
-There are no env vars for login throttling. `crudauth` applies an escalating per-IP / per-identifier lockout internally and returns `429 Too Many Requests` with a `Retry-After` header once the threshold is hit. Behind a proxy, set `TRUSTED_PROXY_HOPS` (above) so the lockout keys on the real client IP rather than the proxy's.
+### 登录锁定
+
+原文称登录节流没有环境变量：`crudauth` 内部按 IP 和登录标识执行逐级锁定，达到阈值后返回带 `Retry-After` 的 `429 Too Many Requests`。在代理后部署时，设置上文的 `TRUSTED_PROXY_HOPS`，让锁定使用真实客户端 IP，而非代理 IP。
+
+> 译注：此处与入门配置指南列出的 `LOGIN_*` 变量不一致，使用时请核对当前代码。
+
+<a id="oauth"></a>
 
 ### OAuth
 
@@ -311,14 +350,18 @@ OAUTH_GITHUB_CLIENT_ID=
 OAUTH_GITHUB_CLIENT_SECRET=
 ```
 
-## Admin Interface (SQLAdmin)
+<a id="admin-interface-sqladmin"></a>
+
+## 管理界面（SQLAdmin）
 
 ```env
 ADMIN_ENABLED=true              # enables the panel
 ADMIN_BASE_URL=/admin           # where it is mounted, and the admin cookie's path
 ```
 
-## Application Metadata
+<a id="application-metadata"></a>
+
+## 应用元数据
 
 ```env
 DEBUG=false
@@ -336,16 +379,13 @@ API_TERMS_OF_SERVICE=
 API_TAGS_METADATA=[]
 ```
 
-`API_SUMMARY` is the one-line summary beside the description, `API_TERMS_OF_SERVICE`,
-`API_CONTACT_URL` and `API_LICENSE_URL` take URLs, `API_LICENSE_IDENTIFIER` takes an SPDX identifier
-such as `MIT`, and `API_TAGS_METADATA` takes a JSON array of OpenAPI tag objects, which is left out of
-the document when it does not parse.
+`API_SUMMARY` 是描述旁的一行摘要；`API_TERMS_OF_SERVICE`、`API_CONTACT_URL` 和 `API_LICENSE_URL` 接收 URL；`API_LICENSE_IDENTIFIER` 接收 `MIT` 等 SPDX 标识；`API_TAGS_METADATA` 接收 OpenAPI 标签对象的 JSON 数组，无法解析时不加入文档。
 
-`API_TITLE`, `API_DESCRIPTION` and `API_VERSION` override `APP_NAME`, `APP_DESCRIPTION` and
-`VERSION` in the OpenAPI document. A field left empty is left out of it, so a new project names no
-contact and no licence until it sets its own.
+`API_TITLE`、`API_DESCRIPTION` 和 `API_VERSION` 覆盖 OpenAPI 文档中的 `APP_NAME`、`APP_DESCRIPTION` 和 `VERSION`。字段为空时不输出，因此新项目在自行配置前不会声明联系人或许可证。
 
-### API Settings (optional overrides)
+<a id="api-settings-optional-overrides"></a>
+
+### API 设置（可选覆盖）
 
 ```env
 # API_PREFIX=/api
@@ -354,23 +394,23 @@ contact and no licence until it sets its own.
 # OPENAPI_URL=/openapi.json   # set empty to serve no schema, which also takes /docs and /redoc with it
 ```
 
-`API_PREFIX` must start with `/` and must not end with `/`; anything else is refused when the
-settings load. It moves every API route, the OAuth routes and the `no-store` cache header with it.
+`API_PREFIX` 必须以 `/` 开头，且不能以 `/` 结尾，否则加载配置时拒绝。它会同时移动所有 API 路由、OAuth 路由，以及 `no-store` 缓存头的作用路径。
 
-## API Keys
+<a id="api-keys"></a>
+
+## API 密钥
 
 ```env
 KEY_USAGE_RETENTION_DAYS=90      # days of key usage rows to keep; 0 keeps every row, below 0 is refused
 ```
 
-A row per request carries the caller's address and user agent, so the window is what bounds the
-personal data the table holds. The analytics routes read no further back than what is kept. See
-[how long the usage rows are kept](../authentication/api-keys.md#how-long-the-usage-rows-are-kept)
-for what prunes them.
+每次请求的记录包含调用者地址和 User-Agent，因此保留窗口决定表中个人数据的存储范围。分析接口不会读取保留范围之外的数据。清理方式见[用量记录保留时间](../authentication/api-keys.md#how-long-the-usage-rows-are-kept)。
 
-## Initial Setup
+<a id="initial-setup"></a>
 
-These are read by `python -m scripts.setup_initial_data`:
+## 初始设置
+
+由 `python -m scripts.setup_initial_data` 读取：
 
 ```env
 ADMIN_NAME=Admin User
@@ -379,13 +419,15 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=Change-Me-Now-1!
 ```
 
-The default tier name is also configurable (defaults to `free`):
+默认等级名称也可配置，默认为 `free`：
 
 ```env
 DEFAULT_TIER_NAME=free
 ```
 
-## Logging
+<a id="logging"></a>
+
+## 日志
 
 ```env
 LOG_LEVEL=INFO
@@ -399,26 +441,30 @@ LOG_DEVELOPMENT_VERBOSE=true
 LOG_PRODUCTION_OPTIMIZE=true
 ```
 
-`LOG_FORMAT` names the console format only; a log file is written in its environment's own format,
-which is what a collector reading it expects. A value no formatter implements is refused when the
-settings load.
+`LOG_FORMAT` 只指定控制台格式。日志文件使用所在环境对应的格式，以符合收集器预期。配置加载时会拒绝没有对应格式化器的值。
 
-## Production Security Checklist
+<a id="production-security-checklist"></a>
 
-Before deploying to production:
+## 生产安全清单
 
-1. Generate a strong `SECRET_KEY` (at least 64 bytes of entropy)
-2. Use unique passwords for the database and every Redis instance
-3. Use separate Redis databases for each service (`CACHE_REDIS_DB=0`, `RATE_LIMITER_REDIS_DB=1`, `TASKIQ_REDIS_DB=3`)
-4. Restrict `CORS_ORIGINS` to your real domains (no `*`)
-5. Set strong admin credentials (`ADMIN_USERNAME`, `ADMIN_PASSWORD`)
-6. Review session timeouts for your security posture
-7. Set `ENVIRONMENT=production` to enable the security validator
-8. If using RabbitMQ, replace the `guest/guest` defaults
+部署生产环境前：
 
-## Troubleshooting
+1. 生成强 `SECRET_KEY`，至少包含 64 字节熵。
+2. 数据库和每个 Redis 实例使用独立密码。
+3. 各服务使用独立 Redis DB：`CACHE_REDIS_DB=0`、`RATE_LIMITER_REDIS_DB=1`、`TASKIQ_REDIS_DB=3`。
+4. `CORS_ORIGINS` 限定为真实域名，不使用 `*`。
+5. 设置强管理员凭据：`ADMIN_USERNAME`、`ADMIN_PASSWORD`。
+6. 根据安全要求检查会话超时。
+7. 设置 `ENVIRONMENT=production`，启用安全校验器。
+8. 使用 RabbitMQ 时替换 `guest/guest` 默认凭据。
 
-### Variables Not Loading
+<a id="troubleshooting"></a>
+
+## 故障排查
+
+<a id="variables-not-loading"></a>
+
+### 变量未加载
 
 ```bash
 # Check the file location
@@ -432,7 +478,9 @@ cd backend
 uv run --no-sync python -c "from src.infrastructure.config.settings import get_settings; s = get_settings(); print(s.APP_NAME, s.ENVIRONMENT)"
 ```
 
-### Database Connection Failed
+<a id="database-connection-failed"></a>
+
+### 数据库连接失败
 
 ```bash
 # Linux
@@ -443,7 +491,9 @@ psql -h localhost -U postgres -d postgres
 brew services list | grep postgresql
 ```
 
-### Redis Connection Failed
+<a id="redis-connection-failed"></a>
+
+### Redis 连接失败
 
 ```bash
 redis-cli -h localhost -p 6379 ping  # should print PONG
@@ -455,8 +505,10 @@ sudo systemctl status redis-server
 brew services list | grep redis
 ```
 
-## See Also
+<a id="see-also"></a>
 
-- **[Settings Classes](settings-classes.md)** — How env vars are turned into Python settings
-- **[Docker Setup](docker-setup.md)** — Compose configuration
-- **[Environment-Specific](environment-specific.md)** — Recommended values per environment
+## 另请参阅
+
+- **[配置类](settings-classes.md)**：环境变量如何转换为 Python 配置。
+- **[Docker 配置](docker-setup.md)**：Compose 配置。
+- **[分环境配置](environment-specific.md)**：各环境推荐值。

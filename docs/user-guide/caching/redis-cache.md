@@ -1,14 +1,18 @@
-# Server-Side Cache (Redis or Memcached)
+<a id="server-side-cache-redis-or-memcached"></a>
 
-Server-side caching stores responses keyed by request shape so subsequent identical requests skip the database. This page covers the `@cache` decorator and the provider API.
+# 服务端缓存（Redis 或 Memcached）
 
-The same code works against Redis or Memcached — pick via `CACHE_BACKEND`. The "Redis" label on this page is historical; everything below works for both backends unless explicitly called out.
+服务端按请求结构缓存响应，让相同请求跳过数据库。本页介绍 `@cache` 和 provider API。通过 `CACHE_BACKEND` 选后端；“Redis”是历史名称，除特别说明外两种后端都适用。
 
-## The `@cache` Decorator
+<a id="the-cache-decorator"></a>
 
-The decorator handles caching for GET endpoints and invalidation for mutations.
+## `@cache` 装饰器
 
-### Basic Usage
+缓存 GET，写操作后失效。
+
+<a id="basic-usage"></a>
+
+### 基本用法
 
 ```python
 from typing import Annotated, Any
@@ -34,23 +38,22 @@ async def get_widget(
     return await widget_service.get_by_id(widget_id, db)
 ```
 
-The decorator builds the cache key as `widget:{widget_id}`. On cache hits, the handler doesn't run — the cached value is returned directly.
+生成键 `widget:{widget_id}`，命中时直接返回、不执行处理器。
 
-!!! warning "`request: Request` is required"
-    The decorator inspects `request.method` to decide whether to read or invalidate. The first parameter of every decorated route must be `request: Request`. Without it the decorator raises an error.
+!!! warning "必须有 `request: Request`"
+    装饰器读取 `request.method` 决定缓存或失效，被装饰路由的首个参数必须为 `request: Request`，否则报错。
 
-### How It Works
+<a id="how-it-works"></a>
 
-1. **GET requests**: check the cache → return on hit, run the handler + cache the response on miss.
-   An empty answer (`[]`, `{}`, `""`) is cached and served like any other, so a page with nothing on
-   it isn't re-read on every request
-2. **PUT/PATCH/POST/DELETE**: run the handler, then **delete** the cache key for the same
-   `(key_prefix, resource_id)` — the write's own query string is not part of that key, so what it
-   clears is the entry for the resource and not an entry nobody stored. A listing's pages each have
-   their own key, so clearing all of them needs `pattern_to_invalidate_extra`
-3. **Fail-open**: if the cache backend errors out, the decorator logs a warning and falls through to run the handler. Your endpoint stays available
+### 工作方式
 
-### Decorator Parameters
+1. **GET**：先查缓存；命中直接返回，未命中执行并缓存。`[]`、`{}`、`""` 等空结果也缓存，避免空列表不断查询。
+2. **PUT / PATCH / POST / DELETE**：成功执行后删除相同 `(key_prefix, resource_id)` 的缓存键。写请求的查询字符串不参与该键，确保清除资源条目而非从未缓存的键。分页列表每页独立，全部清理需 `pattern_to_invalidate_extra`。
+3. **失败放行**：缓存错误记录警告后执行处理器，接口继续可用。
+
+<a id="decorator-parameters"></a>
+
+### 参数
 
 ```python
 @cache(
@@ -65,17 +68,14 @@ The decorator builds the cache key as `widget:{widget_id}`. On cache hits, the h
 )
 ```
 
-The key is `prefix[:resource_id][:q=query][:u=caller]`. The query part is the parameters the route
-declares, read from the route itself so an alias counts, and so does a parameter a dependency or a
-query model reads, sorted and percent-escaped, so two orderings of one query share an entry while a
-value holding an `&` or an `=` cannot read back as the parameters it spells. Where there is no route
-to read, every parameter the request carried goes into the key instead of none of them. Two pages of
-one listing, two callers of one route, and two scopes of one caller's credentials never share an
-entry.
+键格式为 `prefix[:resource_id][:q=query][:u=caller]`。查询部分读取路由声明的参数，包括别名、依赖读取参数和查询模型字段，排序并百分号转义，因此参数顺序不同共享条目，值中的 `&`、`=` 不会被误解。无法读取路由时使用请求全部参数，避免完全忽略。不同页、不同调用者及同账户不同 scope 不共享条目。
 
-### `key_prefix` — Cache Namespace
+<a id="key_prefix-cache-namespace"></a>
+<a id="key_prefix--cache-namespace"></a>
 
-The prefix can use `{kwarg_name}` placeholders to interpolate route parameters:
+### `key_prefix`：命名空间
+
+可用 `{kwarg_name}` 插值路由参数：
 
 ```python
 @cache(key_prefix="widget", ...)
@@ -88,11 +88,14 @@ The prefix can use `{kwarg_name}` placeholders to interpolate route parameters:
 # → "user_5_widgets:page_1:size_10:42"
 ```
 
-The `{...}` placeholders are interpolated from the route handler's keyword arguments (path/query parameters and dependencies).
+占位符来自处理器关键字参数，包括路径、查询和依赖。
 
-### `resource_id_name` — Which Argument is the ID
+<a id="resource_id_name-which-argument-is-the-id"></a>
+<a id="resource_id_name--which-argument-is-the-id"></a>
 
-The decorator appends `:{resource_id}` to the prefix. Resource ID resolution:
+### `resource_id_name`：资源 ID 参数
+
+在前缀后附加 `:{resource_id}`，解析方式：
 
 ```python
 # Explicit — recommended
@@ -104,38 +107,26 @@ async def get_widget(request: Request, widget_id: int, ...): ...
 async def get_user(request: Request, username: str, ...): ...
 ```
 
-Without a `resource_id_name` the key has no id part, which is what a listing wants: its query
-string identifies the page, and the page is not a resource.
+未设置则没有 ID 部分，适合以查询字符串标识页码的列表。
 
-### `per_caller` — Who the Entry Belongs To
+<a id="per_caller-who-the-entry-belongs-to"></a>
+<a id="per_caller--who-the-entry-belongs-to"></a>
 
-By default each caller gets their own entry, and `caller_from` names the argument the caller is read
-from, which holds a `Principal` (`CurrentPrincipalDep`). A per-caller route that names no argument
-raises `ValueError` where it is declared, because which argument identifies the caller is the
-route's to say rather than something to go looking for. A credential that carries a scope, an API
-key, is keyed apart from its owner's session and from the account's other scopes, since it holds
-less than the account does.
+### `per_caller`：条目归属
 
-Only a principal will do: a `current_user` mapping is the account, and says nothing about which of
-its credentials asked, so a route keyed on one would store a session's response where a key scoped
-to reading reads it. A per-caller route whose named argument holds anything else, or nothing, is
-**not cached at all**: the decorator logs a warning and calls through, rather than hand one person's
-response to the next.
+默认每个调用者独立，`caller_from` 指定包含 `Principal`（`CurrentPrincipalDep`）的参数。启用逐调用者缓存却未指定参数名时，声明处抛 `ValueError`。带 scope 的密钥与所有者会话、其他范围分别存储，因为能力不同。
 
-A route whose response is identical for everyone passes `per_caller=False` to share one entry; see
-[Per-Caller vs Shared Caches](cache-strategies.md#per-caller-vs-shared-caches) for when that is
-safe.
+必须是 principal；`current_user` 字典仅描述账户，无法区分凭据，可能让密钥读取会话结果。参数不是 principal 或为空时，**完全不缓存**，记录警告后执行，避免串用他人数据。
 
-### What ships cached
+所有人响应一致时用 `per_caller=False`，见[逐调用者与共享缓存](cache-strategies.md#per-caller-vs-shared-caches)。
 
-`GET /api/v1/rate-limits/` is the one shipped route with the decorator on it: a superuser-only
-listing of tier configuration, the same for every caller (`per_caller=False`), cached for
-`RATE_LIMITS_CACHE_SECONDS`. Its `PATCH` and `DELETE` carry
-`pattern_to_invalidate_extra=["rate_limits:*"]`, so a change clears every cached page. Pattern
-invalidation needs a backend that supports it — Redis does; the memcached backend logs that it
-cannot.
+<a id="what-ships-cached"></a>
 
-It reaches the decorator through `wiring/cache.py` rather than importing it:
+### 模板中已有的缓存
+
+`GET /api/v1/rate-limits/` 是随附的缓存路由：超级用户查看等级配置，对所有人相同，`per_caller=False`，TTL 为 `RATE_LIMITS_CACHE_SECONDS`。PATCH 和 DELETE 设置 `pattern_to_invalidate_extra=['rate_limits:*']`，清全部页。Redis 支持，Memcached 不支持并记录日志。
+
+路由通过 `wiring/cache.py` 获取装饰器：
 
 ```python
 from ...wiring.cache import cached
@@ -143,15 +134,17 @@ from ...wiring.cache import cached
 @cached(key_prefix="rate_limits", per_caller=False)
 ```
 
-The cache is a feature a project can remove, so the wiring hands a route either the real decorator
-or `infrastructure/uncached.py`, which returns the route unchanged. A route therefore asks for
-caching without depending on whether this project kept the cache.
+缓存可移除，wiring 因此提供真实装饰器或原样返回路由的 `infrastructure/uncached.py`，路由无需依赖项目是否保留缓存。
 
-## Invalidation
+<a id="invalidation"></a>
 
-### Automatic on Mutations
+## 失效
 
-Any non-GET method on a route decorated with the same `(key_prefix, resource_id_name)` automatically invalidates that key:
+<a id="automatic-on-mutations"></a>
+
+### 写操作自动失效
+
+相同 `(key_prefix, resource_id_name)` 的非 GET 路由自动清理对应键：
 
 ```python
 @router.patch("/{widget_id}")
@@ -161,11 +154,13 @@ async def update_widget(request: Request, widget_id: int, ...) -> dict[str, Any]
     return await widget_service.update(widget_id, values, db)
 ```
 
-The cache deletion happens **after** the handler returns successfully. If the handler raises, the cache isn't touched.
+在处理器成功返回**之后**删除，抛错不动缓存。
 
-### Invalidating Related Keys (`to_invalidate_extra`)
+<a id="invalidating-related-keys-to_invalidate_extra"></a>
 
-When mutating a resource, you often need to invalidate other caches that reference it. Use `to_invalidate_extra` — a dict of `{prefix: id_kwarg}`:
+### 关联键失效：`to_invalidate_extra`
+
+写资源时清理引用它的其他缓存，使用 `{prefix: id_kwarg}` 字典：
 
 ```python
 @router.post("/")
@@ -186,14 +181,16 @@ async def create_widget(
     return await widget_service.create(widget, owner_id, db)
 ```
 
-The `id_kwarg` value can be a literal (like `"global"`) or a placeholder reference (`"owner_id"` resolves from the route's kwargs).
+`id_kwarg` 可以是字面值如 `global`，或从路由关键字解析的 `owner_id`。
 
-!!! note "Only on mutations"
-    `to_invalidate_extra` and `pattern_to_invalidate_extra` are not allowed on GET routes — the decorator raises `InvalidRequestError` if you try. Cache invalidation only happens on PUT/PATCH/POST/DELETE.
+!!! note "仅写操作"
+    GET 不允许 `to_invalidate_extra` 和 `pattern_to_invalidate_extra`，否则抛 `InvalidRequestError`。仅 PUT / PATCH / POST / DELETE 执行失效。
 
-### Pattern-Based Invalidation (`pattern_to_invalidate_extra`)
+<a id="pattern-based-invalidation-pattern_to_invalidate_extra"></a>
 
-For bulk wipes, use Redis pattern matching:
+### 模式失效：`pattern_to_invalidate_extra`
+
+批量清理使用 Redis 模式：
 
 ```python
 @router.delete("/{widget_id}")
@@ -214,11 +211,13 @@ async def delete_widget(
     await widget_service.delete(widget_id, db)
 ```
 
-**Memcached doesn't support patterns.** When `CACHE_BACKEND=memcached`, `pattern_to_invalidate_extra` raises `PatternMatchingNotSupportedError` (logged at error level). The non-pattern delete still happens.
+**Memcached 不支持模式**，会抛 `PatternMatchingNotSupportedError` 并记录错误，普通键删除仍执行。
 
-## The Provider API
+<a id="the-provider-api"></a>
 
-For cache operations outside of routes (background jobs, services, scripts), use the provider API directly:
+## Provider API
+
+后台任务、服务和脚本等非路由代码直接操作：
 
 ```python
 from src.infrastructure.cache.provider import (
@@ -252,33 +251,31 @@ await delete_pattern(pattern="user:42:*")
 await clear()
 ```
 
-Values are serialized via `fastapi.encoders.jsonable_encoder` automatically — you can store dicts, lists, and any JSON-compatible structure.
+值自动通过 `fastapi.encoders.jsonable_encoder` 序列化，支持字典、列表等 JSON 兼容结构。
 
-## Cache Key Conventions
+<a id="cache-key-conventions"></a>
 
-The decorator generates keys as:
+## 缓存键约定
+
+生成格式：
 
 ```
 {formatted_key_prefix}:{resource_id}
 ```
 
-A few patterns the codebase uses:
+| 模式 | 用途 |
+|------|------|
+| `widget:42` | 按 ID 的单资源 |
+| `user_widgets:5` | 用户资源列表 |
+| `user_{username}_widgets:page_{page}` | 用户范围分页 |
+| `search:{query_hash}` | 哈希后的搜索 |
+| `analytics_{user_id}_30d:report` | 时间窗口分析 |
 
-| Pattern | Use case |
-|---------|----------|
-| `widget:42` | Single resource by id |
-| `user_widgets:5` | List of a user's widgets |
-| `user_{username}_widgets:page_{page}` | Paginated list scoped to a user |
-| `search:{query_hash}` | Hashed search query |
-| `analytics_{user_id}_30d:report` | Time-windowed analytics |
+前缀应唯一，避免无关缓存碰撞；匹配失效方式，例如按用户清理就包含用户 ID；可读可预测，便于调试。
 
-Pick prefixes that:
+<a id="configuration"></a>
 
-1. **Are unique** — never let two unrelated caches collide on the same key
-2. **Match how you'll invalidate** — if you'll wipe by user, include the user identifier
-3. **Are predictable** — anyone debugging should be able to read the key and know what's in it
-
-## Configuration
+## 配置
 
 ```env
 CACHE_ENABLED=true
@@ -293,87 +290,114 @@ CACHE_REDIS_CONNECT_TIMEOUT=5
 CACHE_REDIS_POOL_SIZE=10
 ```
 
-When `CACHE_ENABLED=false`, the decorator becomes a no-op (the handler runs every time). Use this in tests or when isolating performance issues.
+关闭缓存后每次执行处理器，适合测试或定位性能问题。
 
-## Picking Expiration Times
+<a id="picking-expiration-times"></a>
 
-| Data shape | Suggested TTL |
-|------------|---------------|
-| Static reference data (e.g. country list, tier list) | 24 hours (`86400`) |
-| User profile / public objects | 5–30 minutes (`300`–`1800`) |
-| Paginated list endpoints | 1–5 minutes (`60`–`300`) |
-| Search results | 5–15 minutes (`300`–`900`) |
-| Frequently changing dashboards | 30–60 seconds |
+## 过期时间
 
-Default is 1 hour (`3600`). Override per route based on staleness tolerance.
+| 数据 | 建议 TTL |
+|------|----------|
+| 国家、等级等静态参考 | 24 小时，86400 秒 |
+| 用户资料 / 公开对象 | 5–30 分钟，300–1800 秒 |
+| 分页列表 | 1–5 分钟，60–300 秒 |
+| 搜索结果 | 5–15 分钟，300–900 秒 |
+| 高频变化仪表盘 | 30–60 秒 |
 
-## Real Examples
+默认一小时 3600 秒，按可接受陈旧程度覆盖。
 
-The boilerplate doesn't currently use `@cache` on its built-in routes (the existing endpoints are admin/list operations where the data churns enough that caching isn't a clear win). Add `@cache` to your own modules where it pays off — typically: read-heavy GETs on rarely-changing data.
+<a id="real-examples"></a>
 
-## Performance Tips
+## 实际示例
 
-### Use `schema_to_select` Together with Caching
+本节原文称内置路由尚未使用 `@cache`，建议在读多写少数据上自行添加。
 
-When the underlying CRUD call uses `schema_to_select=WidgetRead`, the cached payload is the trimmed dict — smaller cache values, faster serialization on hit.
+> 译注：与上文已缓存 `GET /api/v1/rate-limits/` 的说明不一致。
 
-### Don't Cache Personalized Responses Globally
+<a id="performance-tips"></a>
 
-If your handler returns different data per user but the cache key only includes the resource ID, **users see each other's data**. Either:
+## 性能建议
 
-- Include `user_id` in the prefix: `key_prefix="widget_for_user_{user_id}"`
-- Don't cache it
+<a id="use-schema_to_select-together-with-caching"></a>
 
-### Cache the Response, Not the Computation
+### 配合 `schema_to_select`
 
-The decorator caches the route handler's return value. If you need to cache an expensive sub-computation but not the whole response, use the provider API directly inside your service.
+底层使用 `schema_to_select=WidgetRead`，可缓存精简字典，减少体积和序列化成本。
 
-### Watch Pool Saturation
+<a id="dont-cache-personalized-responses-globally"></a>
 
-Default `CACHE_REDIS_POOL_SIZE=10` is enough for typical workloads. If you have very high concurrency on cached endpoints, raise it. Watch the application logs for `redis.exceptions.ConnectionError` — that often means pool exhaustion.
+### 不要全局缓存个性化响应
 
-## Graceful Degradation
+响应按用户不同但键只有资源 ID，会导致用户看到彼此数据。原文建议前缀包含 `user_id`，如 `widget_for_user_{user_id}`，或不要缓存；上文的新模式则使用 principal 隔离。
 
-If the cache backend is unreachable, the decorator catches the error and falls through to run the handler. Your endpoint keeps working at non-cached speed. This fail-open behavior is intentional — cached data is reproducible from the database, so cache outages shouldn't take the API down.
+<a id="cache-the-response-not-the-computation"></a>
 
-You'll see a warning in the logs:
+### 缓存响应或子计算
+
+装饰器缓存处理器返回值，只需缓存昂贵子计算时，在服务中直接用 provider。
+
+<a id="watch-pool-saturation"></a>
+
+### 关注连接池
+
+`CACHE_REDIS_POOL_SIZE=10` 适合一般负载，高并发可提高，日志 `redis.exceptions.ConnectionError` 可能表示连接池耗尽。
+
+<a id="graceful-degradation"></a>
+
+## 降级
+
+缓存不可达时捕获错误并执行处理器，以未缓存速度运行。数据可重建，因此采用失败放行，日志会出现：
 
 ```
 Cache backend not available: <error>
 ```
 
-That's your signal to investigate the cache infrastructure.
+据此排查缓存基础设施。
 
-## Troubleshooting
+<a id="troubleshooting"></a>
 
-### Decorator never reads from cache
+## 故障排查
 
-Check that `request: Request` is the first parameter of the decorated function. Without it, the decorator can't determine the HTTP method and can't decide whether to cache or invalidate.
+<a id="decorator-never-reads-from-cache"></a>
 
-### Pattern invalidation fails on Memcached
+### 始终不读缓存
 
-`PatternMatchingNotSupportedError` is expected — Memcached doesn't support pattern operations. Either switch to Redis or invalidate keys explicitly via `to_invalidate_extra`.
+检查首个参数是否 `request: Request`，否则无法识别方法。
 
-### Cached data is stale after a mutation
+<a id="pattern-invalidation-fails-on-memcached"></a>
 
-The mutation route needs the **same `(key_prefix, resource_id_name)`** as the GET route. If your `PATCH /widgets/{widget_id}` uses `key_prefix="widget"` and your `GET /widgets/{widget_id}` uses `key_prefix="widget_cache"`, they won't talk to each other.
+### Memcached 模式失效失败
 
-### Cache returns the wrong user's data
+属于预期，改用 Redis 或 `to_invalidate_extra` 显式删除。
 
-You're keying by resource ID without including the user. See "Don't Cache Personalized Responses Globally" above.
+<a id="cached-data-is-stale-after-a-mutation"></a>
 
-## Key Files
+### 写入后数据仍旧
 
-| Component | Location |
-|-----------|----------|
-| Decorator | `backend/src/infrastructure/cache/decorator.py` |
-| Provider API | `backend/src/infrastructure/cache/provider.py` |
-| Redis backend | `backend/src/infrastructure/cache/backends/redis.py` |
-| Memcached backend | `backend/src/infrastructure/cache/backends/memcached.py` |
-| Settings | `backend/src/infrastructure/config/settings.py` (`CacheSettings`) |
+写和读必须使用相同 `(key_prefix, resource_id_name)`，例如 `widget` 与 `widget_cache` 不会相互失效。
 
-## Next Steps
+<a id="cache-returns-the-wrong-users-data"></a>
 
-- **[Client Cache](client-cache.md)** — `Cache-Control` headers for browser caching
-- **[Cache Strategies](cache-strategies.md)** — Patterns for keys, related-key invalidation, cache-aside flows
-- **[Environment Variables](../configuration/environment-variables.md#cache)** — Full settings reference
+### 返回其他用户数据
+
+键只有资源 ID，没有用户维度，见上文个性化响应说明。
+
+<a id="key-files"></a>
+
+## 关键文件
+
+| 组件 | 位置 |
+|------|------|
+| 装饰器 | `backend/src/infrastructure/cache/decorator.py` |
+| Provider | `backend/src/infrastructure/cache/provider.py` |
+| Redis | `backend/src/infrastructure/cache/backends/redis.py` |
+| Memcached | `backend/src/infrastructure/cache/backends/memcached.py` |
+| 配置 | `backend/src/infrastructure/config/settings.py` 的 `CacheSettings` |
+
+<a id="next-steps"></a>
+
+## 后续步骤
+
+- **[客户端缓存](client-cache.md)**：浏览器缓存头。
+- **[缓存策略](cache-strategies.md)**：键、关联失效、旁路缓存。
+- **[环境变量](../configuration/environment-variables.md#cache)**：完整配置。

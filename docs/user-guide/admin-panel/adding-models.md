@@ -1,14 +1,18 @@
-# Adding Models to the Admin
+<a id="adding-models-to-the-admin"></a>
 
-Adding your own models to the admin is straightforward, but there's one quirk to know upfront: the boilerplate's models use SQLAlchemy's `MappedAsDataclass`, which requires a special mixin to play nicely with SQLAdmin.
+# 向后台添加模型
 
-For the full range of options, see the [SQLAdmin documentation](https://github.com/smithyhq/sqladmin).
+注册模型较简单，但模板使用 SQLAlchemy 的 `MappedAsDataclass`，需特殊 mixin 适配 SQLAdmin。
 
-## The DataclassModelMixin
+完整选项见 [SQLAdmin 文档](https://github.com/smithyhq/sqladmin)。
 
-SQLAdmin's default insert flow creates an empty model instance, then sets attributes one by one. That breaks dataclass models with required fields that have no defaults.
+<a id="the-dataclassmodelmixin"></a>
 
-The boilerplate solves this with `DataclassModelMixin` (`backend/src/interfaces/admin/mixins.py`) — it constructs the model with all the form data at once.
+## DataclassModelMixin
+
+SQLAdmin 默认先创建空实例，再逐个设置属性；对于有无默认值必填字段的 dataclass，这会失败。
+
+`backend/src/interfaces/admin/mixins.py` 的 `DataclassModelMixin` 改为一次性传入全部表单数据构造：
 
 ```python
 from ...interfaces.admin.mixins import DataclassModelMixin
@@ -17,14 +21,13 @@ class MyModelAdmin(DataclassModelMixin, ModelView, model=MyModel):
     ...
 ```
 
-**Every admin view in the codebase uses this mixin.** If you forget it, you'll get an `AttributeError` (or worse, a silent NULL) when creating records.
+**代码库的所有后台视图都使用它**。遗漏会造成创建时的 `AttributeError`，甚至静默写入 NULL。
 
-## The TextCsvExportMixin
+<a id="the-textcsvexportmixin"></a>
 
-SQLAdmin writes `str(value)` for every column of a CSV export, so a name a user typed at signup
-reaches the file as it was stored. A spreadsheet runs a cell that starts with `=`, `+`, `-`, `@`, a
-tab or a carriage return as a formula, so `TextCsvExportMixin` (same module) prefixes those cells
-with an apostrophe. Add it to any view with `can_export = True`:
+## TextCsvExportMixin
+
+SQLAdmin CSV 导出将每列转为 `str(value)`，用户注册输入原样进入文件。表格软件会把以 `=`、`+`、`-`、`@`、制表符或回车开头的单元格当公式。相同模块的 `TextCsvExportMixin` 为这些文本加单引号前缀。所有 `can_export = True` 的视图应添加：
 
 ```python
 from ...interfaces.admin.mixins import DataclassModelMixin, TextCsvExportMixin
@@ -33,25 +36,21 @@ class MyModelAdmin(DataclassModelMixin, TextCsvExportMixin, ModelView, model=MyM
     can_export = True
 ```
 
-It covers both CSV paths — the plain one and the one `use_pretty_export = True` takes. Numbers,
-dates and `None` are written as SQLAdmin writes them, so a negative number stays a number; only
-text gets the apostrophe. JSON exports go to SQLAdmin unchanged.
+同时覆盖普通 CSV 和 `use_pretty_export = True` 路径。数字、日期和 None 保持 SQLAdmin 原样，负数仍是数字；JSON 导出不变。
 
-If your view implements `custom_export_cell` itself, pass what it returns through
-`as_spreadsheet_text` from the same module — a method defined on the view replaces the mixin's.
+视图自行实现 `custom_export_cell` 时会覆盖 mixin，应对返回值调用同模块 `as_spreadsheet_text`。
 
-SQLAdmin's `can_export` defaults to `True`, so a view that says nothing about exporting still
-answers `/admin/{identity}/export/csv`. The mixin has to sit **before** `ModelView` in the bases:
-after it, the view inherits SQLAdmin's export instead of this one.
-`tests/unit/interfaces/admin/test_csv_export.py` sweeps `ADMIN_VIEWS` and fails for any view that
-exports without the mixin winning, so a new view is caught rather than discovered in a file.
+SQLAdmin 的 `can_export` 默认 True，未声明仍提供 `/admin/{identity}/export/csv`。Mixin 必须位于 `ModelView` **之前**，否则继承顺序使原导出生效。`tests/unit/interfaces/admin/test_csv_export.py` 遍历 `ADMIN_VIEWS`，确保所有可导出视图都由安全 mixin 接管。
 
-## Adding a New Model View
+<a id="adding-a-new-model-view"></a>
 
-### 1. Create the View File
+## 添加模型视图
 
-A view lives with the feature whose model it shows, so removing that feature takes
-its admin view with it.
+<a id="1-create-the-view-file"></a>
+
+### 1. 创建视图文件
+
+视图与模型所属功能放在一起，移除功能时一并移除。
 
 ```python
 # backend/src/modules/widgets/admin.py
@@ -89,9 +88,11 @@ class WidgetAdmin(DataclassModelMixin, TextCsvExportMixin, ModelView, model=Widg
     can_export = True
 ```
 
-### 2. Register It
+<a id="2-register-it"></a>
 
-Add it to the wiring, which is the one place that says what this project registers:
+### 2. 注册
+
+加入唯一集中列出视图的 wiring：
 
 ```python
 # backend/src/wiring/admin.py
@@ -106,11 +107,15 @@ ADMIN_VIEWS: tuple[type, ...] = (
 )
 ```
 
-That's it — restart the app and Widgets show up in the sidebar under the "Inventory" category.
+重启后，Widgets 显示在侧栏 **Inventory** 分类。
 
-## Configuration Options
+<a id="configuration-options"></a>
 
-### Column Display
+## 配置选项
+
+<a id="column-display"></a>
+
+### 列展示
 
 ```python
 column_list = [MyModel.id, MyModel.name, MyModel.status]
@@ -119,9 +124,11 @@ column_labels = {
 }
 ```
 
-The boilerplate's `UserAdmin` uses `column_labels` to render `hashed_password` as just "Password" — the actual hashing happens in `on_model_change`.
+`UserAdmin` 用 `column_labels` 将 `hashed_password` 显示为 Password，实际哈希在 `on_model_change` 完成。
 
-### Search and Sort
+<a id="search-and-sort"></a>
+
+### 搜索与排序
 
 ```python
 column_searchable_list = [MyModel.name, MyModel.email]
@@ -129,24 +136,30 @@ column_sortable_list = [MyModel.id, MyModel.created_at]
 column_default_sort = [(MyModel.created_at, True)]   # True = descending
 ```
 
-### Form Rules
+<a id="form-rules"></a>
 
-Use your Pydantic schemas to drive form fields — keeps the admin forms aligned with your API validation:
+### 表单规则
+
+通过 Pydantic Schema 驱动字段，保持与 API 校验一致：
 
 ```python
 form_create_rules = list(MyModelCreate.model_fields.keys())
 form_edit_rules = list(MyModelUpdate.model_fields.keys())
 ```
 
-You can also write the list explicitly if you want a different order or to include FK columns (more on that below).
+需要不同顺序或包含外键列时，也可显式编写列表。
 
-## Foreign Keys and Relationships
+<a id="foreign-keys-and-relationships"></a>
 
-The boilerplate's models use a **dual pattern**: foreign-key columns for database operations and relationships for SQLAdmin display.
+## 外键与关联关系
 
-### The Model Pattern
+模型采用双重模式：数据库操作使用外键列，SQLAdmin 展示使用关联关系。
 
-Every model that has a foreign key also defines the corresponding relationship:
+<a id="the-model-pattern"></a>
+
+### 模型模式
+
+有外键时定义对应关系：
 
 ```python
 # modules/widgets/models.py
@@ -177,12 +190,16 @@ class Widget(Base, ...):
     )
 ```
 
-### Why Both?
+<a id="why-both"></a>
 
-- **FastCRUD** works with FK columns directly and returns dicts: `widget["owner_id"]`
-- **SQLAdmin** uses the relationship to render a friendly dropdown showing the related object's `__repr__` instead of a raw integer
+### 为何同时存在
 
-### `column_list` Uses the Relationship
+- **FastCRUD** 直接用外键列并返回字典，如 `widget['owner_id']`。
+- **SQLAdmin** 用关联展示友好下拉框，显示对象 `__repr__` 而非整数。
+
+<a id="column_list-uses-the-relationship"></a>
+
+### `column_list` 使用关系
 
 ```python
 class WidgetAdmin(DataclassModelMixin, TextCsvExportMixin, ModelView, model=Widget):
@@ -191,38 +208,44 @@ class WidgetAdmin(DataclassModelMixin, TextCsvExportMixin, ModelView, model=Widg
     column_list = [Widget.id, Widget.name, Widget.owner, Widget.created_at]
 ```
 
-The boilerplate's `UserAdmin` does this for tier:
+`UserAdmin` 等级列示例：
 
 ```python
 column_list = [User.id, User.name, User.username, User.email, User.is_superuser, User.tier]
 ```
 
-`User.tier` is the relationship, not `User.tier_id`.
+使用 `User.tier`，而非 `User.tier_id`。
 
-### Form Rules Use FK Column Names
+<a id="form-rules-use-fk-column-names"></a>
 
-For forms, include the **FK column name** (the underscore-id one) in your rules. SQLAdmin auto-generates a searchable dropdown:
+### 表单规则使用外键列名
+
+规则中使用带 `_id` 的**外键列名**，SQLAdmin 自动生成可搜索下拉框：
 
 ```python
 form_create_rules = [*WidgetCreate.model_fields.keys(), "owner_id"]
 ```
 
-### `lazy="selectin"` Is Required
+<a id="lazyselectin-is-required"></a>
 
-SQLAdmin runs in async context, so relationships must use `lazy="selectin"` to avoid lazy-loading errors. Symptom of forgetting: `MissingGreenlet` or `greenlet_spawn has not been called`. `User.tier` in the boilerplate already uses this pattern.
+### `lazy="selectin"`
 
-The exception is large one-to-many collections such as `Tier.users`, which uses `lazy="select"` so that loading a tier doesn't load every user in it. SQLAdmin still loads a relationship whenever a page uses it: it `selectinload`s the relationships in `column_list` and in the form columns (the details page reuses the edit-form query), and a relationship form field lists every row of the related table. So keep large collections out of the list, the form and the details page, as `TierAdmin` does:
+SQLAdmin 在异步上下文运行，常规关系使用 `lazy="selectin"` 避免延迟加载异常，遗漏表现为 `MissingGreenlet` 或 `greenlet_spawn has not been called`。模板的 `User.tier` 已这样配置。
+
+大的一对多集合是例外，例如 `Tier.users` 使用 `lazy="select"`，避免加载等级时带出所有用户。SQLAdmin 会对列表与表单中的关系执行 `selectinload`，详情页复用编辑查询；关系表单还会列出关联表全部行。因此大集合应从列表、表单、详情排除，如 `TierAdmin`：
 
 ```python
 form_excluded_columns = [Tier.users]
 column_details_exclude_list = [Tier.users]
 ```
 
-`column_details_exclude_list` replaces `column_details_list = "__all__"`; SQLAdmin doesn't accept both on the same view, and the details page shows every other column by default.
+`column_details_exclude_list` 替代 `column_details_list = "__all__"`，两者不能同时设置，其余列默认展示。
 
-### Don't Set `default=None` on Relationships
+<a id="dont-set-defaultnone-on-relationships"></a>
 
-For nullable foreign keys, never set `default=None` on the relationship:
+### 关系不要设置 `default=None`
+
+可空外键也不要在关系本身设置 `default=None`：
 
 ```python
 # WRONG — SQLAlchemy clears the FK during commit
@@ -232,15 +255,18 @@ tier: Mapped["Tier | None"] = relationship("Tier", default=None, init=False)
 tier: Mapped["Tier | None"] = relationship("Tier", init=False)
 ```
 
-The User model demonstrates the correct pattern.
+用户模型展示了正确方式。`DataclassModelMixin` 构造前会过滤关系对象，因此 `owner_id=42` 有效，混入 `owner=<User instance>` 会忽略。
 
-`DataclassModelMixin` automatically filters out relationship objects before constructing the dataclass — so the form data containing `owner_id=42` works, but a stray `owner=<User instance>` would be ignored.
+<a id="data-transformation-hooks"></a>
 
-## Data Transformation Hooks
+## 数据转换钩子
 
-### `on_model_change` — Transform Before Save
+<a id="on_model_change-transform-before-save"></a>
+<a id="on_model_change--transform-before-save"></a>
 
-Runs before insert and update. Use it to hash passwords, normalize fields, etc.
+### `on_model_change`：保存前转换
+
+插入和更新前运行，可哈希密码、规范化字段：
 
 ```python
 from typing import Any
@@ -261,11 +287,14 @@ class UserAdmin(DataclassModelMixin, ModelView, model=User):
             data["hashed_password"] = get_password_hash(data["hashed_password"])
 ```
 
-`is_created` distinguishes create from update. For new records, `model` is `None`.
+`is_created` 区分创建与更新，创建时 `model` 为 None。
 
-### `after_model_change` — Side Effects After Save
+<a id="after_model_change-side-effects-after-save"></a>
+<a id="after_model_change--side-effects-after-save"></a>
 
-Runs after the record is committed. Useful for sending welcome emails, dispatching webhooks, etc.
+### `after_model_change`：保存后副作用
+
+记录提交后运行，适合欢迎邮件、webhook 等：
 
 ```python
 async def after_model_change(
@@ -279,9 +308,12 @@ async def after_model_change(
         await notify_new_user(model)
 ```
 
-### `delete_model` — Custom Delete Behavior
+<a id="delete_model-custom-delete-behavior"></a>
+<a id="delete_model--custom-delete-behavior"></a>
 
-Override when delete needs to do more than `DELETE FROM`. The boilerplate's `TierAdmin` uses this to call the tier service's `permanent_delete`, which validates that no users or rate limits still reference the tier:
+### `delete_model`：自定义删除
+
+删除不只是 `DELETE FROM` 时覆盖。`TierAdmin` 调用 `permanent_delete` 检查用户和限流引用：
 
 ```python
 async def delete_model(self, request: Request, pk: str) -> None:
@@ -297,9 +329,11 @@ async def delete_model(self, request: Request, pk: str) -> None:
         await tier_service.permanent_delete(tier["name"], db)
 ```
 
-## Bulk Actions
+<a id="bulk-actions"></a>
 
-Bulk actions let admins select multiple records and operate on them at once. Use the `@action` decorator:
+## 批量操作
+
+管理员可多选记录，通过 `@action` 执行：
 
 ```python
 from sqladmin import action
@@ -331,19 +365,18 @@ class WidgetAdmin(DataclassModelMixin, TextCsvExportMixin, ModelView, model=Widg
         return RedirectResponse(referer or request.url_for("admin:list", identity=self.identity))
 ```
 
-Notes:
+说明：
 
-- Selected IDs come from `request.query_params["pks"]` as a comma-separated string
-- `local_session()` opens a session on the shared engine — import it from `infrastructure/database/session.py`
-- Always commit before redirecting, otherwise the change reverts when the request ends
-- sqladmin serves actions on a `GET`, which anything able to navigate the operator's browser can
-  send. The panel's [origin guard](configuration.md#requests-from-another-site) answers `403` to an
-  action a request from another origin asks for, so an action that writes is reached only from the
-  panel's own pages. A link to one in an email or on another site reaches the refusal instead.
+- ID 从 `request.query_params['pks']` 获取，为逗号分隔字符串。
+- 从 `infrastructure/database/session.py` 导入 `local_session()`，在共享引擎上打开会话。
+- 重定向前提交，否则请求结束时回滚。
+- SQLAdmin action 使用 GET，其他站点可诱导浏览器访问。后台[来源保护](configuration.md#requests-from-another-site)对跨源 action 返回 403，写操作只能从后台自身页面发起，邮件或外站链接会被拒绝。
 
-## Icons
+<a id="icons"></a>
 
-SQLAdmin uses [Font Awesome](https://fontawesome.com/icons) icons. Set them with `icon`:
+## 图标
+
+使用 [Font Awesome](https://fontawesome.com/icons)，通过 `icon` 配置：
 
 ```python
 icon = "fa-solid fa-user"          # users
@@ -353,20 +386,24 @@ icon = "fa-solid fa-gauge-high"    # rate limits
 icon = "fa-solid fa-cube"          # generic
 ```
 
-## Categories
+<a id="categories"></a>
 
-Group related views together with `category`:
+## 分类
+
+用 `category` 归组：
 
 ```python
 class WidgetAdmin(...):
     category = "Inventory"
 ```
 
-Views with the same category appear under the same sidebar header. The boilerplate's existing views use `"Users & Access"`.
+同类视图出现在相同侧栏标题下，已有视图使用 `Users & Access`。
 
-## Soft Delete vs Hard Delete
+<a id="soft-delete-vs-hard-delete"></a>
 
-Models that mix in `SoftDeleteMixin` have `is_deleted` and `deleted_at` columns. SQLAdmin's default delete is a hard `DELETE FROM` — if you want soft-deletion behavior, override `delete_model`:
+## 软删除与硬删除
+
+`SoftDeleteMixin` 提供 `is_deleted`、`deleted_at`，但 SQLAdmin 默认硬删除。需要软删除时覆盖：
 
 ```python
 async def delete_model(self, request: Request, pk: str) -> None:
@@ -375,28 +412,34 @@ async def delete_model(self, request: Request, pk: str) -> None:
         await db.commit()
 ```
 
-Most of the time you actually want a hard delete here (the admin is editing the canonical row, not making a user-visible deletion), but be deliberate about which behavior you want.
+原文认为后台常需要直接删除规范记录，但应明确选择行为。
 
-## Real Examples in the Codebase
+<a id="real-examples-in-the-codebase"></a>
 
-The boilerplate ships two admin views — read them as reference implementations:
+## 实际参考
 
-| File | What it shows |
-|------|---------------|
-| `backend/src/modules/user/admin.py` | `on_model_change` for password hashing, OAuth-provider select field, relationship in `column_list`, custom `column_labels` |
-| `backend/src/modules/tier/admin.py` | `delete_model` override that calls a service method, schema-driven form rules |
+本节介绍两个参考视图：
 
-## Key Files
+| 文件 | 展示内容 |
+|------|----------|
+| `backend/src/modules/user/admin.py` | 密码哈希钩子、OAuth 选择框、关联列、自定义标签 |
+| `backend/src/modules/tier/admin.py` | 调用服务的删除覆盖、Schema 驱动表单 |
 
-| Component | Location |
-|-----------|----------|
-| Dataclass mixin | `backend/src/interfaces/admin/mixins.py` |
-| View registry | `backend/src/wiring/admin.py` |
-| Example views | `backend/src/modules/user/admin.py`, `backend/src/modules/tier/admin.py` |
-| Auth backend | `backend/src/interfaces/admin/auth.py` |
+<a id="key-files"></a>
 
-## Next Steps
+## 关键文件
 
-- **[User Management](user-management.md)** — Hardening admin authentication
-- **[Models](../database/models.md)** — Defining the SQLAlchemy models that admin views render
-- **[Schemas](../database/schemas.md)** — Pydantic schemas used for form rules
+| 组件 | 位置 |
+|------|------|
+| dataclass mixin | `backend/src/interfaces/admin/mixins.py` |
+| 注册表 | `backend/src/wiring/admin.py` |
+| 示例视图 | `backend/src/modules/user/admin.py`、`backend/src/modules/tier/admin.py` |
+| 认证后端 | `backend/src/interfaces/admin/auth.py` |
+
+<a id="next-steps"></a>
+
+## 后续步骤
+
+- **[用户管理](user-management.md)**：强化后台认证。
+- **[模型](../database/models.md)**：定义视图展示的模型。
+- **[Schema](../database/schemas.md)**：表单规则。

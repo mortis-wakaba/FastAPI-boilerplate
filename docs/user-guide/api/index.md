@@ -1,17 +1,23 @@
-# API Development
+<a id="api-development"></a>
 
-Learn how to build REST APIs with the FastAPI Boilerplate. This section covers everything you need to create robust, production-ready APIs.
+# API 开发
 
-## What You'll Learn
+本章介绍使用 FastAPI Boilerplate 构建可靠、适用于生产的 REST API。
 
-- **[Endpoints](endpoints.md)** - Create endpoints with authentication and validation
-- **[Pagination](pagination.md)** - Add pagination to list endpoints
-- **[Exception Handling](exceptions.md)** - Handle errors with the boilerplate's exception types
-- **[API Versioning](versioning.md)** - Version your APIs and maintain backward compatibility
+<a id="what-youll-learn"></a>
 
-## Quick Overview
+## 内容概览
 
-Routes are defined in each module's `routes.py`. The aggregator at `interfaces/api/v1/__init__.py` mounts each module's router under `/api/v1`.
+- **[接口](endpoints.md)**：创建带认证和校验的接口。
+- **[分页](pagination.md)**：为列表接口添加分页。
+- **[异常处理](exceptions.md)**：使用模板异常类型处理错误。
+- **[API 版本管理](versioning.md)**：维护版本及向后兼容性。
+
+<a id="quick-overview"></a>
+
+## 快速概览
+
+路由定义在各模块的 `routes.py`，由 `interfaces/api/v1/__init__.py` 汇总并挂载在 `/api/v1` 下。
 
 ```python
 # backend/src/modules/user/routes.py
@@ -39,7 +45,7 @@ async def create_user(
     return await user_service.create(user, db)
 ```
 
-The aggregator wires it up:
+汇总路由将其接入：
 
 ```python
 # backend/src/interfaces/api/v1/__init__.py
@@ -51,13 +57,17 @@ router = APIRouter(prefix="/v1")
 router.include_router(users_router, prefix="/users")
 ```
 
-Final URL: `POST /api/v1/users/`.
+最终 URL：`POST /api/v1/users/`。
 
-## Key Features
+<a id="key-features"></a>
 
-### Built-in Authentication
+## 主要功能
 
-Session-based auth with HTTP-only cookies. Pull the current user from `infrastructure/auth/dependencies`:
+<a id="built-in-authentication"></a>
+
+### 内置认证
+
+使用 HttpOnly Cookie 的会话认证，通过 `infrastructure/auth/dependencies` 获取当前用户：
 
 ```python
 from ...infrastructure.auth.dependencies import get_current_user
@@ -69,7 +79,7 @@ async def get_profile(
     return current_user
 ```
 
-For superuser-only endpoints, swap in `get_current_superuser`. For endpoints gated on a permission a role grants, add `require_permissions(...)` to the route's `dependencies`:
+仅超级用户接口改用 `get_current_superuser`。由角色权限控制的接口，在路由 `dependencies` 中添加 `require_permissions(...)`：
 
 ```python
 from ...infrastructure.auth.authorization import require_permissions
@@ -78,11 +88,13 @@ from ...infrastructure.auth.authorization import require_permissions
 async def list_users(...): ...
 ```
 
-`infrastructure/auth/deps.py` also exports `CurrentPrincipalDep` (the crudauth `Principal`) and `CurrentPermissionsDep` (the caller's effective permissions) for handlers that need them. See [Authentication](../authentication/index.md) for the full picture.
+`infrastructure/auth/deps.py` 还提供 `CurrentPrincipalDep`（crudauth 的 `Principal`）和 `CurrentPermissionsDep`（调用者有效权限）。完整说明见[身份认证](../authentication/index.md)。
 
-### Easy Pagination
+<a id="easy-pagination"></a>
 
-The boilerplate uses FastCRUD's `PaginatedListResponse` and `paginated_response()` helper:
+### 简便分页
+
+使用 FastCRUD 的 `PaginatedListResponse` 和 `paginated_response()`：
 
 ```python
 from fastcrud import PaginatedListResponse, compute_offset, paginated_response
@@ -102,9 +114,11 @@ async def list_users(
     return paginated_response(crud_data=result, page=page, items_per_page=items_per_page)
 ```
 
-### Automatic Validation
+<a id="automatic-validation"></a>
 
-Request bodies, query parameters, and response models are all validated by Pydantic:
+### 自动校验
+
+请求体、查询参数和响应模型均由 Pydantic 校验：
 
 ```python
 @router.post("/", response_model=UserRead)
@@ -112,11 +126,11 @@ async def create_user(user: UserCreate):  # ← validates input
     return await user_service.create(user, db)  # ← validates output via response_model
 ```
 
-### Error Handling
+<a id="error-handling"></a>
 
-Domain errors live in `modules/common/exceptions.py`, and each feature subclasses them. The app
-installs one handler for them, so a route raises (or lets the service raise) and the client gets the
-mapped status with a `support_id`:
+### 错误处理
+
+领域错误位于 `modules/common/exceptions.py`，各功能定义其子类。应用统一处理，路由可直接抛出或让服务抛出异常，客户端得到映射后的状态及 `support_id`：
 
 ```python
 from ..common.exceptions import ResourceNotFoundError
@@ -135,9 +149,11 @@ async def get_user_by_username(
     return user
 ```
 
-See [Exception Handling](exceptions.md) for the full catalog.
+完整类型见[异常处理](exceptions.md)。
 
-## Architecture
+<a id="architecture"></a>
+
+## 架构
 
 ```text
 HTTP Request
@@ -153,15 +169,17 @@ SQLAlchemy Model  (modules/<feature>/models.py)
 PostgreSQL
 ```
 
-The split keeps:
+职责分工：
 
-- HTTP concerns (status codes, schemas, dependencies) in `routes.py`
-- Business logic (validation, orchestration) in `service.py`
-- Database I/O in `crud.py`
+- `routes.py` 处理状态码、Schema、依赖等 HTTP 事项。
+- `service.py` 处理校验和编排等业务逻辑。
+- `crud.py` 处理数据库 I/O。
 
-You can mock any layer in tests; you can change one without breaking the others.
+测试时可以模拟任意层，也可独立修改某层。
 
-## Directory Structure
+<a id="directory-structure"></a>
+
+## 目录结构
 
 ```text
 backend/src/
@@ -180,37 +198,41 @@ backend/src/
     └── api_keys/routes.py         # /api/v1/api-keys/*
 ```
 
-Auth lives in `infrastructure/auth/routes.py` instead of in a feature module because authentication is structural — every other feature depends on it.
+认证位于 `infrastructure/auth/routes.py` 而非业务模块，因为它是其他功能共同依赖的基础能力。
 
-## Mounted Endpoints
+<a id="mounted-endpoints"></a>
 
-What ships out of the box:
+## 已挂载接口
 
-| Prefix | Source | Notes |
-|--------|--------|-------|
-| `POST/GET/PATCH/DELETE /api/v1/users/*` | `modules/user/routes.py` | Open create; reads/updates need a session, and a lookup by username returns no email. Listing every user needs the `user.read` permission |
-| `GET /api/v1/tiers/*` | `modules/tier/routes.py` | Authenticated list + lookup by name |
-| `GET/PATCH/DELETE /api/v1/rate-limits/*` | `modules/rate_limit/routes.py` | Superuser only |
-| `POST /api/v1/auth/login`, `logout`, `check-auth` | `infrastructure/auth/routes.py` | Session auth |
-| `GET /api/v1/auth/sessions`, `DELETE /api/v1/auth/sessions/{handle}`, `POST /api/v1/auth/logout-all`, `POST /api/v1/auth/csrf/refresh` | crudauth, mounted in `infrastructure/auth/routes.py` | Device management |
-| `POST /api/v1/auth/change-password`, `GET /api/v1/auth/me` | crudauth's account router, mounted in `infrastructure/auth/routes.py` | Session auth; `set-password` is not mounted |
-| `GET /api/v1/auth/oauth/{provider}`, `oauth/callback/{provider}` | crudauth router mounted in `infrastructure/auth/routes.py` | Google OAuth (configured in `infrastructure/auth/setup.py`) |
-| `POST/GET/PATCH/DELETE /api/v1/api-keys/*` | `modules/api_keys/routes.py` | Authenticated key management |
-| `GET /admin/*` | `interfaces/admin/initialize.py` | SQLAdmin UI |
-| `GET /docs`, `/redoc`, `/openapi.json` | App factory (protected when gated) | Disabled in production unless `ENABLE_DOCS_IN_PRODUCTION=true`; when enabled in production or running in staging, requires superuser authentication |
-| `GET /health` | `interfaces/main.py` | Liveness: the process is serving |
-| `GET /health/ready` | `interfaces/main.py` | Readiness: the overall status, `503` while a critical dependency is unreachable |
+模板提供：
 
-## What's Next
+| 前缀 | 来源 | 说明 |
+|------|------|------|
+| `POST/GET/PATCH/DELETE /api/v1/users/*` | `modules/user/routes.py` | 开放创建；读取、更新需会话；按用户名查询不返回邮箱；列出全部用户需 `user.read` 权限 |
+| `GET /api/v1/tiers/*` | `modules/tier/routes.py` | 认证后列出、按名称查询 |
+| `GET/PATCH/DELETE /api/v1/rate-limits/*` | `modules/rate_limit/routes.py` | 仅超级用户 |
+| `POST /api/v1/auth/login`、`logout`、`check-auth` | `infrastructure/auth/routes.py` | 会话认证 |
+| `GET /api/v1/auth/sessions`、`DELETE /api/v1/auth/sessions/{handle}`、`POST /api/v1/auth/logout-all`、`POST /api/v1/auth/csrf/refresh` | crudauth，由 `infrastructure/auth/routes.py` 挂载 | 设备管理 |
+| `POST /api/v1/auth/change-password`、`GET /api/v1/auth/me` | crudauth 账户路由，由 `infrastructure/auth/routes.py` 挂载 | 会话认证，不挂载 `set-password` |
+| `GET /api/v1/auth/oauth/{provider}`、`oauth/callback/{provider}` | crudauth，由 `infrastructure/auth/routes.py` 挂载 | Google OAuth，在 `infrastructure/auth/setup.py` 配置 |
+| `POST/GET/PATCH/DELETE /api/v1/api-keys/*` | `modules/api_keys/routes.py` | 认证后的密钥管理 |
+| `GET /admin/*` | `interfaces/admin/initialize.py` | SQLAdmin 界面 |
+| `GET /docs`、`/redoc`、`/openapi.json` | 应用工厂，按环境保护 | 生产默认关闭；生产启用或 staging 环境需超级用户认证 |
+| `GET /health` | `interfaces/main.py` | 存活检查，确认进程提供服务 |
+| `GET /health/ready` | `interfaces/main.py` | 就绪检查，关键依赖不可达时返回 `503` |
 
-Start with the basics:
+<a id="whats-next"></a>
 
-1. **[Endpoints](endpoints.md)** - Common patterns for new routes
-2. **[Pagination](pagination.md)** - List endpoints with paged responses
-3. **[Exception Handling](exceptions.md)** - The boilerplate's exception model
-4. **[API Versioning](versioning.md)** - Versioning strategy
+## 后续步骤
 
-Then go deeper:
+从基础开始：
 
-5. **[Database Schemas](../database/schemas.md)** - Pydantic shapes used in routes
-6. **[CRUD Operations](../database/crud.md)** - The data layer below the service
+1. **[接口](endpoints.md)**：新路由常见模式。
+2. **[分页](pagination.md)**：分页列表响应。
+3. **[异常处理](exceptions.md)**：模板异常模型。
+4. **[API 版本管理](versioning.md)**：版本策略。
+
+深入阅读：
+
+5. **[数据 Schema](../database/schemas.md)**：路由使用的 Pydantic 结构。
+6. **[CRUD 操作](../database/crud.md)**：服务下方的数据层。

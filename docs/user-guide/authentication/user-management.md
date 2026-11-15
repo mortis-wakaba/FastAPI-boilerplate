@@ -1,30 +1,36 @@
-# User Management
+<a id="user-management"></a>
 
-User management covers the full lifecycle: registration, authentication, profile updates, and deletion. This page documents the endpoints and patterns the boilerplate ships with.
+# 用户管理
 
-## Endpoints at a Glance
+用户管理覆盖注册、认证、资料更新和删除。本页介绍模板已有接口和使用模式。
 
-All under `/api/v1/users/` (defined in `modules/user/routes.py`):
+<a id="endpoints-at-a-glance"></a>
 
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/api/v1/users/` | Create a new user | Open |
-| `GET` | `/api/v1/users/` | Paginated list of users | Superuser |
-| `GET` | `/api/v1/users/me` | Current user's profile | Session |
-| `GET` | `/api/v1/users/{username}` | Public profile by username (display fields only) | Session |
-| `GET` | `/api/v1/users/active-and-inactive/{username}` | Same as above, includes soft-deleted | Superuser |
-| `PATCH` | `/api/v1/users/{username}` | Update profile (own or admin) | Session |
-| `DELETE` | `/api/v1/users/{username}` | Soft-delete a user (own or admin) | Session |
-| `DELETE` | `/api/v1/users/db/{username}` | GDPR anonymize (admin) | Superuser |
-| `GET` | `/api/v1/users/{username}/rate-limits` | User's rate limits via tier | Session |
-| `GET` | `/api/v1/users/{username}/tier` | User's tier details | Session |
-| `PATCH` | `/api/v1/users/{username}/tier` | Change a user's tier | Superuser |
+## 接口速览
 
-Plus the auth endpoints under `/api/v1/auth/` documented in [Sessions](sessions.md).
+定义于 `modules/user/routes.py`，前缀为 `/api/v1/users/`：
 
-## Registration
+| 方法 | 路径 | 说明 | 认证 |
+|------|------|------|------|
+| `POST` | `/api/v1/users/` | 创建用户 | 开放 |
+| `GET` | `/api/v1/users/` | 分页用户列表 | 本表原文写超级用户，下文写 `user.read` |
+| `GET` | `/api/v1/users/me` | 当前用户资料 | 会话 |
+| `GET` | `/api/v1/users/{username}` | 按用户名读取公开展示字段 | 会话 |
+| `GET` | `/api/v1/users/active-and-inactive/{username}` | 包含软删除用户 | 超级用户 |
+| `PATCH` | `/api/v1/users/{username}` | 更新自身或管理员可管理的资料 | 会话 |
+| `DELETE` | `/api/v1/users/{username}` | 软删除自身或管理员可管理的用户 | 会话 |
+| `DELETE` | `/api/v1/users/db/{username}` | GDPR 匿名化 | 超级用户 |
+| `GET` | `/api/v1/users/{username}/rate-limits` | 用户等级对应的限流 | 会话 |
+| `GET` | `/api/v1/users/{username}/tier` | 等级详情 | 会话 |
+| `PATCH` | `/api/v1/users/{username}/tier` | 修改等级 | 超级用户 |
 
-`POST /api/v1/users/` is open — no auth required. Anyone can create an account.
+`/api/v1/auth/` 接口见[会话](sessions.md)。
+
+<a id="registration"></a>
+
+## 注册
+
+`POST /api/v1/users/` 开放，无需认证，任何人可注册。
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/users/ \
@@ -37,32 +43,15 @@ curl -X POST http://localhost:8000/api/v1/users/ \
   }'
 ```
 
-**Every accepted signup answers the same**: `201` with a fixed message and nothing of the account.
-An address that already has one is answered exactly like an address that was free, and the account
-holding it is sent a notice instead, so this route cannot be used to find out who is registered.
-A taken **username** still answers `409`, because a username is public: a profile URL reveals it,
-and a signup form has to be able to say so. The created profile is not in the answer either: an
-answer carrying it would say whether the address was free. Read it from
-`GET /api/v1/users/{username}` once signed in.
+**每个被接受的注册返回相同内容**：`201`、固定消息、不包含账户信息。已有邮箱与未占用邮箱响应一致，已有账户会收到通知，避免接口枚举注册邮箱。**用户名**已占用仍返回 `409`，因为用户名可通过公开资料 URL 发现，注册表单也需要明确反馈。响应不返回新资料，否则会泄露邮箱是否可用。登录后通过 `GET /api/v1/users/{username}` 读取。
 
-The route delegates to `UserService.create`, which:
+路由委托 `UserService.create`：
 
-1. Hashes the password with bcrypt via `get_password_hash_async`, **before** either credential is
-   looked up. bcrypt is the slowest thing a signup does, so hashing only where the address was free
-   would tell a caller by the clock what the answer deliberately does not
-2. Checks `email` is unique → raises `EmailAlreadyRegisteredError` if not, which the route answers
-   with the fixed message, leaving the notice to the address owner to a background task so that
-   path waits on no mail server either. Addresses are stored trimmed and lowercased, and
-   `ix_user_email_lower` keeps the database from holding the same address twice in different case
-   even when a write goes around the service
-3. Checks `username` is unique → raises `UserExistsError` if not (→ 409)
-4. Builds a `UserCreateInternal` (schema with `hashed_password` instead of `password`)
-5. Persists via `crud_users.create`. Where a unique constraint refuses the row rather than the
-   checks above, two signups racing for one address or an address stored before it was
-   canonicalised, the index that refused it decides the answer: `ix_user_email` or
-   `ix_user_email_lower` gives the fixed message, `ix_user_username` gives `409`. The index is read
-   from the name asyncpg puts on the error, matched whole, so a later index whose name merely looks
-   like one of those is not mistaken for it
+1. 查找凭据前，先通过 `get_password_hash_async` 执行 bcrypt。它是注册最慢的步骤，只对可用邮箱执行会造成时间侧信道。
+2. 检查邮箱唯一性，重复抛 `EmailAlreadyRegisteredError`，路由返回固定消息，通知邮件交后台发送，不等待邮件服务器。邮箱去空白、转小写存储，`ix_user_email_lower` 在绕过服务写入时仍保证大小写不重复。
+3. 检查用户名唯一性，重复抛 `UserExistsError`，映射 409。
+4. 构造以 `hashed_password` 代替 `password` 的 `UserCreateInternal`。
+5. 通过 `crud_users.create` 写入。并发注册或旧格式邮箱导致数据库唯一约束拒绝时，以 asyncpg 错误中完整索引名裁决：`ix_user_email` / `ix_user_email_lower` 返回固定消息，`ix_user_username` 返回 409。完整匹配避免后来相似名称的索引被误认。
 
 ```python
 # modules/user/service.py
@@ -83,7 +72,7 @@ async def create(self, user: UserCreate, db: AsyncSession) -> dict[str, Any]:
         raise UserExistsError("Email or username already taken") from collision
 ```
 
-The `UserCreate` schema enforces input validation:
+`UserCreate` 执行输入校验：
 
 ```python
 class UserCreate(UserBase):
@@ -107,20 +96,22 @@ class UserCreate(UserBase):
     oauth_provider: str | None = None
 ```
 
-`extra="forbid"` rejects any unknown fields the client tries to send — useful to keep clients honest.
+`extra="forbid"` 拒绝客户端未知字段。
 
-## Authentication
+<a id="authentication"></a>
 
-Authentication happens via `POST /api/v1/auth/login`. See [Sessions](sessions.md) for the full flow. The credential check itself now lives inside the `crudauth` library — the login route delegates to the `auth` singleton (`infrastructure/auth/setup.py`), which looks the user up, verifies the password, and creates the session. The boilerplate no longer ships an `authenticate_user` helper.
+## 身份认证
 
-Two things to note about the login behavior:
+通过 `POST /api/v1/auth/login` 登录，完整流程见[会话](sessions.md)。路由委托 `infrastructure/auth/setup.py` 的 crudauth `auth` 单例查用户、验密码和建会话，不再提供 `authenticate_user` 辅助函数。
 
-- **Username or email** — both forms work in the same field
-- **Soft-deleted users can't log in** — crudauth reads `User.is_active` (defined as `not is_deleted`), so deactivated accounts are rejected before the password is even checked
+- 同一字段接受**用户名或邮箱**。
+- **软删除用户不能登录**：crudauth 读取 `User.is_active = not is_deleted`，密码检查前拒绝停用账户。
 
-### Password Hashing (bcrypt)
+<a id="password-hashing-bcrypt"></a>
 
-Password hashing helpers come from `crudauth`:
+### 密码哈希（bcrypt）
+
+辅助函数来自 crudauth：
 
 ```python
 from crudauth import get_password_hash, verify_password
@@ -129,17 +120,21 @@ hashed = get_password_hash("plaintext")          # bcrypt, salt generated automa
 ok = await verify_password("plaintext", hashed)  # constant-time compare
 ```
 
-bcrypt handles salt generation automatically and is computationally expensive enough to defeat brute force at scale. `UserService.create` uses `get_password_hash` when persisting a new account (see [Registration](#registration)).
+bcrypt 自动加盐并提供较高计算成本，增加大规模暴力破解难度。本节原文称 `UserService.create` 持久化新账户时使用 `get_password_hash`，[注册](#registration)流程上文则写异步版本。
 
-## Profile Operations
+<a id="profile-operations"></a>
 
-### Get Current User
+## 资料操作
+
+<a id="get-current-user"></a>
+
+### 获取当前用户
 
 ```bash
 curl http://localhost:8000/api/v1/users/me -b cookies.txt
 ```
 
-Trivial route — `get_current_user` already returns the user dict:
+`get_current_user` 已返回用户字典，路由很简单：
 
 ```python
 @router.get("/me", response_model=UserRead)
@@ -149,19 +144,25 @@ async def get_current_user_profile(
     return current_user
 ```
 
-### Get User by Username
+<a id="get-user-by-username"></a>
 
-Public endpoint — no auth required. Filters out soft-deleted users.
+### 按用户名获取用户
+
+本节原文描述为无需认证的公开接口，并过滤软删除用户。
+
+> 译注：与本页接口速览中要求会话的描述不一致。
 
 ```bash
 curl http://localhost:8000/api/v1/users/johndoe
 ```
 
-Returns 404 if not found or soft-deleted. The admin-only `/active-and-inactive/{username}` variant returns soft-deleted users too.
+不存在或软删除返回 404。管理员 `/active-and-inactive/{username}` 也能返回软删除用户。
 
-### Update Profile
+<a id="update-profile"></a>
 
-Users can update their own profile. A credential that carries a scope, an API key among them, needs `user.update` for that too, so a key minted for reading cannot rename the account behind it. Updating someone else's needs superuser, or the `user.update` permission. Tier updates are gated on a separate endpoint (see [Permissions](permissions.md)).
+### 更新资料
+
+用户可修改自身资料。带 scope 的凭据，包括 API 密钥，也需 `user.update`，避免只读密钥重命名账户。修改他人需超级用户或 `user.update`，等级更新走独立接口，见[权限](permissions.md)。
 
 ```bash
 curl -X PATCH http://localhost:8000/api/v1/users/johndoe \
@@ -171,7 +172,7 @@ curl -X PATCH http://localhost:8000/api/v1/users/johndoe \
   -d '{"name": "John Updated"}'
 ```
 
-The service enforces the rules:
+服务执行规则：
 
 ```python
 # modules/user/service.py
@@ -193,15 +194,13 @@ async def verify_update_permission(
     raise PermissionDeniedError("You don't have permission to update profile on this user")
 ```
 
-A `user.update` holder who isn't a superuser is then held to `verify_no_privilege_escalation`: the target must not be a superuser and must hold no permission the requester lacks. See [Permissions](permissions.md#resource-ownership).
+非超级用户的 `user.update` 持有者还需通过 `verify_no_privilege_escalation`：目标不是超级用户，且权限不超出调用者，见[资源归属](permissions.md#resource-ownership)。修改 `username` 时重新检查唯一性。
 
-If the body changes `username`, the service re-checks uniqueness.
+<a id="changing-your-email-address"></a>
 
-#### Changing your email address
+#### 修改邮箱
 
-Not here: the address is not a field of this route, and sending one answers `422`. An account moves
-its address through the confirmed flow, which emails the **new** address a link and tells the **old**
-one once it is used:
+不在资料接口修改，传入 `email` 返回 `422`。账户通过确认流程变更：发送新地址确认链接，使用后通知旧地址：
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/email/change-request \
@@ -211,17 +210,11 @@ curl -X POST http://localhost:8000/api/v1/auth/email/change-request \
   -d '{"new_email": "new@example.com", "password": "<current password>"}'
 ```
 
-Confirming ends every session the account had, the one that asked for the change included: the
-address is what recovers an account, and the confirmation is a link from the new mailbox, so there
-is no session to keep. The owner signs in again, as their new address.
+确认会结束全部会话，包括发起会话。邮箱是恢复凭据，确认来自新邮箱链接，不携带可保留会话，所有者需用新地址重新登录。
 
-See [Recovery Flows](index.md#recovery-flows-email). The admin panel is the other way in: its form
-is built from `UserAdminUpdate`, which does carry `email` (along with the OAuth identifiers and the
-verification flag), so an administrator can correct an address without the owner confirming it.
+见[恢复流程](index.md#recovery-flows-email)。后台表单基于 `UserAdminUpdate`，包含邮箱、OAuth 标识和验证标记，管理员可直接修正，无需所有者确认。
 
-The `UserUpdate` schema makes every field optional so clients can send partial updates. The address,
-the OAuth identifiers and the verification flag are not part of it, so sending any of them returns
-422:
+`UserUpdate` 全部字段可选，支持部分更新；邮箱、OAuth 标识、验证标记不在其中，提交返回 422：
 
 ```python
 from .constants import (
@@ -250,17 +243,19 @@ class UserUpdate(BaseModel):
     ]
 ```
 
-The avatar is served to every signed-in account that reads the profile, so it is held to the
-length of a URL (2048). A picture an OAuth provider hands over is held to the same length and
-left out where it is longer, rather than written and served.
+头像会提供给读取资料的已登录账户，因此限制为 URL 长度 2048。OAuth 提供方头像也受同样限制，超长则忽略而非写入。
 
-## Deletion
+<a id="deletion"></a>
 
-The boilerplate distinguishes three deletion modes — pick based on what the request actually wants.
+## 删除
 
-### Soft Delete
+模板区分三种删除方式。
 
-`DELETE /api/v1/users/{username}` — sets `is_deleted=True` and `deleted_at=now()`. The row stays in the database; the user can no longer log in but their data is preserved.
+<a id="soft-delete"></a>
+
+### 软删除
+
+`DELETE /api/v1/users/{username}` 设置 `is_deleted=True` 和 `deleted_at=now()`，保留数据库行和数据，用户无法再登录。
 
 ```bash
 curl -X DELETE http://localhost:8000/api/v1/users/johndoe \
@@ -268,21 +263,24 @@ curl -X DELETE http://localhost:8000/api/v1/users/johndoe \
   -H "X-CSRF-Token: <token>"
 ```
 
-Permission rules:
+规则：
 
-- A user can soft-delete their own account
-- A superuser can soft-delete anyone
-- The caller must be signed in to a session; an API key is refused
-- With `FRESH_SIGN_IN_SECONDS` set, the sign-in must be no older than that window; unset, nothing is
-  asked ([asking for a fresh sign-in](sessions.md#asking-for-a-fresh-sign-in))
+- 用户可软删除自身。
+- 超级用户可软删除任何人。
+- 必须通过会话登录，拒绝 API 密钥。
+- 设置 `FRESH_SIGN_IN_SECONDS` 时，登录时间必须在窗口内；未设置则不要求，见[近期重新登录](sessions.md#asking-for-a-fresh-sign-in)。
 
-### Hard Delete (database)
+<a id="hard-delete-database"></a>
 
-There's no public hard-delete endpoint by design — deleting rows from `user` would orphan all related data (sessions, API keys, etc.). If you really need it, use FastCRUD's `crud_users.db_delete(...)` from a script or admin task with full understanding of the foreign-key impact.
+### 数据库硬删除
 
-### GDPR Anonymization
+有意不提供公开硬删除接口，直接删除 `user` 行可能影响会话、API 密钥等关联数据。确有需要时，从脚本或管理任务调用 `crud_users.db_delete(...)`，并理解外键影响。
 
-`DELETE /api/v1/users/db/{username}` — superuser only. Replaces PII with neutral values while keeping the row (and therefore foreign-key relationships) intact.
+<a id="gdpr-anonymization"></a>
+
+### GDPR 匿名化
+
+`DELETE /api/v1/users/db/{username}` 仅超级用户可用。替换个人信息为中性值，保留行和外键关系。
 
 ```bash
 curl -X DELETE http://localhost:8000/api/v1/users/db/johndoe \
@@ -290,7 +288,7 @@ curl -X DELETE http://localhost:8000/api/v1/users/db/johndoe \
   -H "X-CSRF-Token: <token>"
 ```
 
-Service implementation:
+服务实现：
 
 ```python
 async def anonymize_user(self, user_id: int, db: AsyncSession) -> None:
@@ -313,41 +311,34 @@ async def anonymize_user(self, user_id: int, db: AsyncSession) -> None:
     await crud_users.delete(db=db, id=user_id)
 ```
 
-The hyphens in that name are outside `USERNAME_PATTERN`, which every signup and rename is held
-to, so nobody can take the name a deletion is about to need. A name that is held anyway, which
-takes a superuser writing one through the admin panel, is tried again with fresh hex up to
-`ANONYMIZATION_ATTEMPTS` times, and the deletion answers `500` rather than reporting a row it
-did not anonymize. Only a write the username index refused is named again; any other refusal is
-raised as it is, since no other name for it would help.
+匿名用户名含连字符，不符合注册和改名的 `USERNAME_PATTERN`，普通用户无法提前占用。若管理员通过后台占用了名称，则生成新十六进制值重试，最多 `ANONYMIZATION_ATTEMPTS`。失败返回 500，不误报成功。只对用户名索引拒绝重试，其余错误直接抛出。
 
-Email is intentionally retained for legal compliance purposes (audit trail, "right to be
-forgotten" doesn't always apply if the platform is required to keep records).
+原文说明有意保留邮箱用于审计和法律记录；这是一项原模板的数据保留设计。
 
-Keeping it also **retires the address**: the row holds it, soft-deleted, so
+保留邮箱也意味着**该地址退役**：
 
-- signing up with it again creates nothing and answers what every signup answers — the row still
-  owns the address, and `ix_user_email_lower` owns it case-insensitively;
-- a verification or password-reset request for it sends nothing and answers exactly as it does for
-  an address with no account, because the row is inactive (`is_active` is `not is_deleted`);
-- an OAuth sign-in with it is refused with `account_inactive` and links nothing, so a provider
-  account can't claim the retired row.
+- 再次注册不创建账户，返回通用消息；软删除行和 `ix_user_email_lower` 仍占用地址。
+- 验证或重置请求不发邮件，与不存在账户响应一致，因为账户 inactive。
+- OAuth 登录返回 `account_inactive`，不关联账户，不能认领退役行。
 
-Nobody inherits the address, and nothing can be delivered to it. If a person has to be able to
-sign up again with the same address, clear the row's `email` yourself as part of the request — at
-which point the anonymized row no longer records who it was.
+其他人不会继承地址，也不会向其投递。如果业务要求同地址重新注册，应在请求处理中自行清空旧行邮箱，此后匿名化行不再记录其原身份。
 
-## Administrative Operations
+<a id="administrative-operations"></a>
 
-### List All Users
+## 管理操作
 
-`GET /api/v1/users/` — paginated, gated on the `user.read` permission (`dependencies=[require_permissions("user.read")]`). A role grants it; superusers always pass. See [Permissions](permissions.md#role-based-permissions).
+<a id="list-all-users"></a>
+
+### 列出全部用户
+
+`GET /api/v1/users/` 分页，要求 `dependencies=[require_permissions("user.read")]`。由角色授权，超级用户始终通过，见[角色权限](permissions.md#role-based-permissions)。
 
 ```bash
 curl "http://localhost:8000/api/v1/users/?page=1&items_per_page=10" \
   -b cookies.txt
 ```
 
-Response shape (via `paginated_response`):
+`paginated_response` 响应：
 
 ```json
 {
@@ -361,19 +352,23 @@ Response shape (via `paginated_response`):
 }
 ```
 
-See [Pagination](../api/pagination.md) for the full pattern.
+完整模式见[分页](../api/pagination.md)。
 
-### View a User's Tier
+<a id="view-a-users-tier"></a>
+
+### 查看用户等级
 
 ```bash
 curl http://localhost:8000/api/v1/users/johndoe/tier -b cookies.txt
 ```
 
-Returns the user record joined with their tier. Permission: own profile or superuser.
+返回用户与等级关联结果，仅本人或超级用户可读。
 
-### Change a User's Tier
+<a id="change-a-users-tier"></a>
 
-`PATCH /api/v1/users/{username}/tier` — superuser only.
+### 修改用户等级
+
+`PATCH /api/v1/users/{username}/tier` 仅超级用户：
 
 ```bash
 curl -X PATCH http://localhost:8000/api/v1/users/johndoe/tier \
@@ -383,20 +378,23 @@ curl -X PATCH http://localhost:8000/api/v1/users/johndoe/tier \
   -d '{"tier_id": 2}'
 ```
 
-The service verifies the tier exists before assigning it. A `tier_id` outside `1..2147483647`
-answers `422`, since the column cannot hold it.
+服务先验证等级存在。`tier_id` 超出 `1..2147483647` 返回 422，避免超出列范围。
 
-### View a User's Rate Limits
+<a id="view-a-users-rate-limits"></a>
+
+### 查看用户限流
 
 ```bash
 curl http://localhost:8000/api/v1/users/johndoe/rate-limits -b cookies.txt
 ```
 
-Returns the rate limits configured for the user's tier. Permission: own profile or superuser.
+返回用户等级的限流配置，仅本人或超级用户可读。
 
-## User Model Reference
+<a id="user-model-reference"></a>
 
-The actual model lives in `modules/user/models.py`. Trimmed:
+## 用户模型参考
+
+实际位于 `modules/user/models.py`，节选：
 
 ```python
 class User(Base, TimestampMixin, SoftDeleteMixin):
@@ -438,27 +436,29 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
         return not self.is_deleted
 ```
 
-!!! note "Existing databases"
-    `username` is 32 characters wide so OAuth signups fit the usernames crudauth generates. Tables created while it was 20 characters keep the old width until you alter them:
+!!! note "已有数据库"
+    `username` 为 32 字符，以容纳 crudauth 生成的 OAuth 用户名。旧版 20 字符列在手动修改前仍保持原长度：
 
     ```sql
     ALTER TABLE "user" ALTER COLUMN username TYPE VARCHAR(32);
     ```
 
-    If you manage the schema with Alembic, `alembic revision --autogenerate` picks up the change instead.
+    使用 Alembic 时，`alembic revision --autogenerate` 可发现该变化。
 
-Mixins from `infrastructure/database/models`:
+`infrastructure/database/models` 提供 mixin：
 
-- `TimestampMixin` — `created_at`, `updated_at`
-- `SoftDeleteMixin` — `is_deleted`, `deleted_at`
+- `TimestampMixin`：`created_at`、`updated_at`。
+- `SoftDeleteMixin`：`is_deleted`、`deleted_at`。
 
-The `is_active` property is **derived** from `not is_deleted` — there's no separate column. `crudauth` reads it during login so a soft-deleted user can't authenticate; `is_deleted` remains the single source of truth.
+`is_active` **派生自** `not is_deleted`，没有独立列，crudauth 据此拒绝软删除用户；状态以 `is_deleted` 为唯一来源。
 
-Table name is **`user`** (singular).
+表名为单数 **`user`**。
 
-## Common CRUD Tasks
+<a id="common-crud-tasks"></a>
 
-The same FastCRUD operations described in [CRUD Operations](../database/crud.md) work on users:
+## 常见 CRUD 操作
+
+[CRUD 操作](../database/crud.md)中的 FastCRUD 用法同样适用于用户：
 
 ```python
 from src.modules.user.crud import crud_users
@@ -478,9 +478,11 @@ result = await crud_users.get_multi(db=db, tier_id=1, is_deleted=False, limit=20
 result = await crud_users.get_multi(db=db, username__icontains="ad")
 ```
 
-## Frontend Integration
+<a id="frontend-integration"></a>
 
-Use cookies, not bearer tokens. The browser will send the session cookie automatically as long as you set `credentials: 'include'`:
+## 前端集成
+
+默认采用 Cookie 而非 bearer，设置 `credentials: 'include'` 后浏览器自动携带会话 Cookie：
 
 ```javascript
 class UserClient {
@@ -556,28 +558,40 @@ class UserClient {
 }
 ```
 
-`credentials: 'include'` makes the browser send/store cookies cross-origin — pair this with `CORS_ALLOW_CREDENTIALS=true` and an explicit `CORS_ORIGINS` list (no `*`) on the server.
+跨源 Cookie 发送和存储还需服务端 `CORS_ALLOW_CREDENTIALS=true` 与明确 `CORS_ORIGINS` 列表，不使用 `*`。
 
-## Security Considerations
+<a id="security-considerations"></a>
 
-### Server-side validation
+## 安全事项
 
-All input validation runs server-side via Pydantic schemas. Client-side checks are nice for UX but don't replace server validation.
+<a id="server-side-validation"></a>
 
-### Login lockout
+### 服务端校验
 
-The login endpoint is automatically throttled by `crudauth` — an escalating per-IP / per-identifier lockout that returns `429` with a `Retry-After` header. There are no env vars to tune it. See [Sessions](sessions.md#login-lockout).
+所有输入通过 Pydantic 在服务端校验，客户端校验仅改善体验，不能替代。
 
-### Generic auth error messages
+<a id="login-lockout"></a>
 
-`POST /api/v1/auth/login` returns "Incorrect username or password" for both wrong username and wrong password — never reveal which one was wrong.
+### 登录锁定
 
-### Soft delete for accounts
+crudauth 自动按 IP 和标识逐级锁定，返回带 `Retry-After` 的 429。本节原文称没有环境变量可调整，与[会话](sessions.md#login-lockout)列出的 `LOGIN_*` 不一致。
 
-The default `DELETE /api/v1/users/{username}` is a soft delete. Hard deletion only for GDPR-style requests, with anonymization preserving FK integrity.
+<a id="generic-auth-error-messages"></a>
 
-## Next Steps
+### 通用认证错误
 
-1. **[Permissions](permissions.md)** — Role-based access control patterns
-2. **[Sessions](sessions.md)** — Cookie / CSRF / session lifecycle
-3. **[Production Guide](../production.md)** — Hardening checklist
+用户名或密码错误均返回 `Incorrect username or password`，不区分。
+
+<a id="soft-delete-for-accounts"></a>
+
+### 账户软删除
+
+默认删除接口软删除。原文将 GDPR 类请求描述为通过匿名化保留外键完整性，而不是直接移除用户行。
+
+<a id="next-steps"></a>
+
+## 后续步骤
+
+1. **[权限](permissions.md)**：角色访问控制。
+2. **[会话](sessions.md)**：Cookie、CSRF、生命周期。
+3. **[生产指南](../production.md)**：安全加固。

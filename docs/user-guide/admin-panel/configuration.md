@@ -1,8 +1,12 @@
-# Admin Panel Configuration
+<a id="admin-panel-configuration"></a>
 
-The admin panel has a deliberately small surface area: it's a [SQLAdmin](https://github.com/smithyhq/sqladmin) instance gated by a username/password from environment variables. Configuration boils down to a handful of `.env` values.
+# 管理后台配置
 
-## Environment Variables
+后台有意保持简单：一个 [SQLAdmin](https://github.com/smithyhq/sqladmin) 实例，通过环境变量中的用户名和密码保护，只需少量 `.env` 配置。
+
+<a id="environment-variables"></a>
+
+## 环境变量
 
 ```env
 # Toggle the admin panel (default: false)
@@ -16,28 +20,34 @@ ADMIN_PASSWORD=Change-Me-Now-1!
 SECRET_KEY=<openssl rand -hex 32>
 ```
 
-That's the whole admin-specific config. Everything else (engine, models, mount path) is hardcoded in `src/interfaces/admin/initialize.py` for simplicity.
+以上为后台专属配置。本节原文称引擎、模型和挂载路径在 `src/interfaces/admin/initialize.py` 写死；后文又说明路径可由 `ADMIN_BASE_URL` 配置。
 
-### Backing Settings Classes
+<a id="backing-settings-classes"></a>
 
-The variables map to two settings classes in `src/infrastructure/config/settings.py`:
+### 对应配置类
 
-- **`AdminSettings`** — `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `DEFAULT_TIER_NAME`. Used by both the admin panel login *and* `scripts/setup_initial_data.py` to bootstrap the first superuser.
-- **`SQLAdminSettings`** — `ADMIN_ENABLED`. Single toggle for the admin panel.
+`src/infrastructure/config/settings.py` 中：
 
-## What Happens at Startup
+- **`AdminSettings`**：`ADMIN_NAME`、`ADMIN_EMAIL`、`ADMIN_USERNAME`、`ADMIN_PASSWORD`、`DEFAULT_TIER_NAME`，供后台登录和初始化首个超级用户脚本共用。
+- **`SQLAdminSettings`**：`ADMIN_ENABLED`，后台总开关。
 
-1. The app factory calls the admin feature's `install(app)`, which the wiring lists among its installers
-2. If `ADMIN_ENABLED` is unset or false, the function returns `None` and the admin panel is **not mounted**
-3. If either `ADMIN_USERNAME` or `ADMIN_PASSWORD` is empty, it writes a warning naming them and returns `None`: a panel nobody can sign in to serves a login form and nothing else
-4. Otherwise, an `AdminAuth` backend is constructed using `SECRET_KEY`
-5. A SQLAdmin `Admin` instance is created against the app's existing database `engine`
-6. The views listed in `src/wiring/admin.py` are registered: `UserAdmin`, `TierAdmin` and the three role views, each shipped by its own feature
-7. The admin app is mounted at `/admin`
+<a id="what-happens-at-startup"></a>
 
-## Login Authentication
+## 启动流程
 
-Login flow (in `interfaces/admin/auth.py`):
+1. 应用工厂调用 wiring 安装器列表中的 admin `install(app)`。
+2. 未设置或关闭 `ADMIN_ENABLED` 时返回 None，**不挂载**。
+3. 用户名或密码为空时记录警告并返回 None，避免挂载只有登录表单却无法使用的后台。
+4. 以 `SECRET_KEY` 构造 `AdminAuth`。
+5. 用应用现有数据库引擎创建 SQLAdmin `Admin`。
+6. 注册 `src/wiring/admin.py` 列出的 UserAdmin、TierAdmin 和三个角色视图。
+7. 挂载 `/admin`。
+
+<a id="login-authentication"></a>
+
+## 登录认证
+
+`interfaces/admin/auth.py` 流程：
 
 ```python
 class AdminAuth(AuthenticationBackend):
@@ -53,39 +63,15 @@ class AdminAuth(AuthenticationBackend):
         ...
 ```
 
-Notes:
+说明：
 
-- Credentials come from environment variables, **not the database**. Restart the app to change them,
-  which signs out every session that was created against the old pair.
-- **Admin login is disabled until both `ADMIN_USERNAME` and `ADMIN_PASSWORD` are set.** With the empty defaults, every login attempt fails — an empty form submission does not authenticate.
-- Only one admin login is supported. There's no multi-admin user table.
-- **Failures are counted in a lockout of the panel's own**, against the client address and the
-  identifier `admin-panel:<address>`, with the thresholds in `LOGIN_MAX_ATTEMPTS`,
-  `LOGIN_ATTEMPT_WINDOW_SECONDS`, `LOGIN_LOCKOUT_BASE_SECONDS` and `LOGIN_LOCKOUT_MAX_SECONDS`. A
-  locked address is refused before its password is compared. The counters live under the panel's own
-  key prefix, so one address has separate budgets at the two doors and nothing sent to
-  `/api/v1/auth/login` can lock the panel out; the cost is that the panel is no longer slowed by an
-  address already failing at the API's door. Behind a proxy, set `TRUSTED_PROXY_HOPS`, or every
-  caller is counted as the proxy.
-- **A second budget is shared by every address**, at five times `LOGIN_MAX_ATTEMPTS` in the same
-  window (25 with the defaults). One password stands behind the panel, so without it a caller
-  changing address guesses at that password without limit, each new address arriving with a full
-  budget of its own. A login that succeeds gives back the attempt it made and leaves the failures
-  that came from elsewhere counted.
-- **Past the shared budget the panel refuses every address**, including one it has counted nothing
-  against, for `LOGIN_LOCKOUT_BASE_SECONDS` (300s). Those failures keep counting for the rest of the
-  900s window, so the first attempt after that lock ends, whoever sends it, locks the panel again
-  for twice as long, and so on up to `LOGIN_LOCKOUT_MAX_SECONDS` (3600s); the rounds it has climbed
-  are kept for an hour, and that hour starts again with every lockout. So a spray of about 26
-  attempts can keep the panel shut for close to an hour, and every retry while it is shut, the
-  operator's included, makes it longer. Each of those retries is also counted against the address it
-  came from, so five of the operator's own tries lock their address too, with its own escalation.
-  That is a door an attacker can close on purpose, which is the trade for a password that can be
-  guessed at 25 times a window, and one more reason to keep the panel off the public internet
-  ([Production Hardening](#production-hardening)).
-- **To open the panel before the lockout ends**, clear the shared counters. They sit under the
-  `admin-panel:rl:all:` key prefix, and the per-address ones under `admin-panel:rl:`, which the
-  pattern below covers as well:
+- 凭据来自环境变量，**不是数据库**。修改需重启，旧凭据创建的所有会话随之失效。
+- 用户名和密码必须同时设置，空默认值不能登录。
+- 只支持一套后台登录，没有多管理员表。
+- **后台使用独立锁定**，按客户端地址和 `admin-panel:<address>` 标识计数，阈值使用 `LOGIN_MAX_ATTEMPTS`、`LOGIN_ATTEMPT_WINDOW_SECONDS`、`LOGIN_LOCKOUT_BASE_SECONDS`、`LOGIN_LOCKOUT_MAX_SECONDS`。锁定后不比较密码。前缀独立，因此 API 登录失败不影响后台，代价是 API 上已失败的地址到后台仍有完整预算。代理后设置 `TRUSTED_PROXY_HOPS`，否则全算代理地址。
+- **另有全地址共享预算**，同窗口为 `LOGIN_MAX_ATTEMPTS` 五倍，默认 25。后台只有一个密码，若只按地址计数，换地址可无限猜。成功登录退还本次尝试，但不清除其他来源失败。
+- **共享预算耗尽后拒绝所有地址**，基础锁定默认 300 秒。失败仍在默认 900 秒窗口累计，首次到期后再尝试会重新锁定并翻倍，最高 3600 秒。递增轮次保留一小时，每次锁定重置保留时间。因此约 26 次攻击就可能使后台关闭近一小时，锁定中的重试（包括操作员）还会延长；操作员五次尝试也会锁住自身地址。这是限制共享密码猜测与可用性的取舍，也是[不向公网开放后台](#production-hardening)的理由。
+- **提前解锁**可清除共享计数。其前缀为 `admin-panel:rl:all:`，单地址前缀为 `admin-panel:rl:`，以下模式覆盖两者：
 
     ```bash
     # RATE_LIMITER_BACKEND=redis, on RATE_LIMITER_REDIS_DB (1 by default)
@@ -95,93 +81,55 @@ Notes:
     psql -c "delete from crudauth_counters where key like 'admin-panel:rl:%'"
     ```
 
-    With `RATE_LIMITER_BACKEND=memory` the counters are in the process, so restarting it clears
-    them. Clearing them gives the attacker their 25 guesses back, so change `ADMIN_PASSWORD` if the
-    lockout is what a spray caused.
-- **Each refusal is logged** on the `src.infrastructure.auth.audit` logger, in the lines a refused
-  API login writes, naming the door, the caller and the username where the panel has that one:
-  `login refused at the admin panel: 'admin' from 203.0.113.7 (curl/8.4.0); invalid_credentials`.
-  See [what a refusal records](../authentication/sessions.md#what-a-refusal-records).
-- Both credentials are compared with `hmac.compare_digest`, so a wrong guess costs the same time
-  whatever its first bytes were.
-- The session is signed with `SECRET_KEY` via the `SessionMiddleware` the panel mounts for itself.
-- **A session lasts eight hours from the login that created it**, however busy the operator has
-  been. It carries the time it was issued and a fingerprint of `ADMIN_USERNAME:ADMIN_PASSWORD`,
-  derived with scrypt and salted with `SECRET_KEY`, and `authenticate` refuses it once either the
-  eight hours are up or the fingerprint stops matching the configured credentials. The cookie is
-  readable by whoever holds it, so the work factor is what keeps a password an operator chose out of
-  reach of a word list run by somebody who also has the key. It is derived as the panel is built and
-  kept for as long as the credentials it was made from, so no request waits for it. A refused
-  session is cleared, so the browser stops sending the cookie. A session carrying neither field,
-  which is what a cookie from a build before this one holds, is refused as well.
-- Signing out clears the session (`request.session.clear()`), and takes a `POST`.
+    `memory` 后端重启即可清除。清除也恢复攻击者的 25 次机会，因攻击触发时应更换 `ADMIN_PASSWORD`。
 
-If you need multiple admin operators, see [User Management](user-management.md) for ways to extend this.
+- **每次拒绝写审计日志** `src.infrastructure.auth.audit`，包含入口、地址、User-Agent，识别到后台用户名时记录用户名，例如 `login refused at the admin panel: 'admin' from 203.0.113.7 (curl/8.4.0); invalid_credentials`，见[拒绝记录](../authentication/sessions.md#what-a-refusal-records)。
+- 两项凭据均用 `hmac.compare_digest` 比较，避免首字节差异影响耗时。
+- 后台专属 `SessionMiddleware` 通过 `SECRET_KEY` 签名。
+- **会话从登录起最多八小时**，与活跃程度无关。它携带签发时间和 `ADMIN_USERNAME:ADMIN_PASSWORD` 的指纹；指纹以 `SECRET_KEY` 加盐、scrypt 派生。超过时限或指纹不匹配即拒绝。Cookie 可读，工作因子保护低熵操作员密码，避免同时得到密钥的人轻易跑字典。派生在构建后台时执行并复用，不阻塞每请求。拒绝会清会话 Cookie，缺少这两个字段的旧版 Cookie 也拒绝。
+- 退出通过 POST，执行 `request.session.clear()`。
 
-### Requests from another site
+需要多管理员时，见[用户管理](user-management.md)。
 
-sqladmin carries no CSRF token, so two things stand between a signed-in operator and another site
-driving the panel from their browser:
+<a id="requests-from-another-site"></a>
 
-- **The cookie is `SameSite=Strict`**, so the browser sends it on nothing another site starts, a
-  top-level link included. A link into the panel from elsewhere lands on the login page for that
-  reason; opening the panel from the browser's own address bar signs you back in without asking for
-  the password again. What `Strict` does not cover is a sibling subdomain: `other.example.com` is
-  the same *site* as `admin.example.com`, so the cookie travels on its requests, which is why the
-  guard below exists.
-- **`SameOriginOnly` answers `403` to a request from elsewhere that could change something**
-  (`interfaces/admin/origin.py`, mounted in front of the panel's session). That is `POST`, `PUT`,
-  `PATCH` and `DELETE`, and also a `GET` of an action route (`/{identity}/action/{slug}`), since
-  sqladmin serves every [`@action`](adding-models.md#bulk-actions) on a `GET` and the panel's own
-  pages reach them through plain links. Each is refused unless the browser's `Sec-Fetch-Site` says
-  `same-origin` or `none`, or the request's `Origin` names the host it arrived at. Every other
-  `GET` is untouched, so links into the panel and its pages still work. A request carrying neither
-  header is allowed, which is what keeps curl and scripts working: no site can make a browser send
-  a request with no origin at all.
+### 来自其他站点的请求
 
-**Signing out takes a `POST`** for the same reason. sqladmin serves logout on `GET` and links to it
-from every page, so anything that made the operator's browser fetch that URL signed them out, and
-`SameSite=Lax` sent the cookie along. `/admin/logout` now answers a `GET` with a one-button form and
-clears the session only on the `POST` that form sends, which the guard above holds to the panel's own
-origin. The sidebar link still leads there; a bookmark or a link from elsewhere reaches the form
-rather than signing anybody out.
+SQLAdmin 没有 CSRF 令牌，使用两层保护：
 
-## Mount Path
+- **`SameSite=Strict` Cookie** 不随其他站点发起的请求发送，顶层链接也不例外，所以外站链接会落到登录页；从地址栏打开仍可使用原会话。兄弟子域如 `other.example.com` 与 `admin.example.com` 属于同一 site，Strict 不阻止，因此还需下一层。
+- **`SameOriginOnly`** 位于 `interfaces/admin/origin.py`，在后台会话前拒绝可能修改数据的跨源请求，返回 `403`。覆盖 POST / PUT / PATCH / DELETE，也包括 `/{identity}/action/{slug}` 的 GET，因为 SQLAdmin 的 `@action` 通过 GET 提供。只有 `Sec-Fetch-Site` 为 `same-origin` / `none`，或 `Origin` 等于接收主机时通过。其他 GET 不变。无这两个头的 curl 和脚本允许，因为站点无法让浏览器完全省去来源信息。
 
-`ADMIN_BASE_URL` decides where the panel is mounted, and defaults to `/admin`:
+**退出使用 POST** 也是同一理由。原 SQLAdmin 用 GET，页面链接、外站请求都可能使操作员退出。现在 GET `/admin/logout` 返回单按钮表单，只有同源 POST 清会话。侧栏、书签和外链只进入确认表单。
+
+<a id="mount-path"></a>
+
+## 挂载路径
+
+`ADMIN_BASE_URL` 默认 `/admin`：
 
 ```env
 ADMIN_BASE_URL=/management
 ```
 
-One setting feeds both the mount (`Admin(base_url=...)`) and the session cookie's `path`, so a panel
-moved elsewhere keeps its login. Written with or without the slashes (`management`, `/management/`)
-it comes out the same; a value that names no path at all is refused at startup.
+同时控制 `Admin(base_url=...)` 和 Cookie path。`management`、`/management/` 会规范为相同路径，无有效路径时启动拒绝。
 
-Behind a proxy that serves the app under a prefix, the cookie follows the prefix too. A prefix set
-with `--root-path /svc` reaches the app per request, so the panel scopes the cookie to the path the
-request arrived through: `/svc/admin` with the default setting. Nothing needs configuring for that.
+代理使用 `--root-path /svc` 时，Cookie 自动跟随实际前缀，如 `/svc/admin`，无需额外配置。修改后应同步前端和运维文档链接。
 
-If you change it, also update any internal links in your frontend or operational docs.
+!!! warning "从 Cookie 尚未限定路径的版本升级"
+    旧 `path=/` Cookie 在八小时内仍发送到所有路径，新路径退出只清新 Cookie。浏览器先发长路径 Cookie，Starlette 保留最后值，旧根路径 Cookie 可能在退出后继续有效。升级后手动清一次 `admin_session`，或更换 `SECRET_KEY` 统一失效；后者也使 crudauth API 用户全部退出。
 
-!!! warning "Upgrading from a build before the cookie was scoped"
+<a id="database-connection"></a>
 
-    Admin sessions created when the cookie had `path=/` keep being sent to every path until they
-    expire (8 hours), and logging out only clears the cookie at the new path. Browsers send the
-    longer-path cookie first and Starlette keeps the last value, so an old `path=/` cookie can
-    outlive a logout. Clear the `admin_session` cookie in your browser once after upgrading, or
-    change `SECRET_KEY` to invalidate every old admin session at once — which also signs every
-    account out of the API, since crudauth keys its session store with `SECRET_KEY` too.
+## 数据库连接
 
-## Database Connection
+后台复用 API 的 **SQLAlchemy 引擎**，无需独立连接或连接池。
 
-SQLAdmin reuses the **same SQLAlchemy engine** the rest of the app uses (imported from `infrastructure/database/session.py`). There's no separate admin database connection or pool to configure.
+<a id="session-cookies"></a>
 
-## Session Cookies
+## 会话 Cookie
 
-The admin login uses Starlette's `SessionMiddleware`, which `AdminAuth` mounts on the panel's own
-routes (`src/interfaces/admin/auth.py`). The API never carries it, so an API request never decodes
-an admin cookie:
+`src/interfaces/admin/auth.py` 的 `AdminAuth` 只为后台挂载 Starlette `SessionMiddleware`，API 不解码后台 Cookie：
 
 ```python
 self.middlewares = [
@@ -198,31 +146,27 @@ self.middlewares = [
 ]
 ```
 
-Cookie behavior:
+行为：
 
-- HTTP-only, signed with `SECRET_KEY`, named `admin_session`
-- Scoped to the panel's mount path (`ADMIN_BASE_URL`, plus the app's `root_path`), so it isn't sent with API requests
-- Same-site `strict`, so it travels on nothing another site starts
-- `Secure` outside `local` and `development`
-- Expires after 8 hours (`SESSION_MAX_AGE_SECONDS`)
+- HttpOnly，名 `admin_session`，`SECRET_KEY` 签名。
+- 路径为 `ADMIN_BASE_URL` 加 `root_path`，不发送到 API。
+- `SameSite=strict`。
+- local / development 外启用 Secure。
+- 八小时有效期，常量 `SESSION_MAX_AGE_SECONDS`。
 
-Starlette re-signs the cookie whenever something writes to the session, which a
-[flashed message](adding-models.md#bulk-actions) does, and that starts its `Max-Age` and its
-signature's clock again. So the cookie's own expiry is not what bounds a session: the time the
-session records at login is, and the panel refuses a session eight hours past it whatever the
-cookie says. Changing either credential refuses every session created against the old pair,
-which is the panel's only way of revoking one.
+写会话（如[闪现消息](adding-models.md#bulk-actions)）会重签 Cookie 并重置 Max-Age，因此真正时限不是 Cookie，而是登录记录的时间，超过八小时仍拒绝。更换任一凭据使旧会话全部失效，这是后台的撤销方式。
 
-For production behind HTTPS, you'll typically want to:
+生产 HTTPS 部署通常在代理终止 TLS，并从公网路由移除 `/admin`，见[生产加固](#production-hardening)。
 
-1. Terminate TLS at the proxy / load balancer
-2. Strip `/admin` from public-facing routing entirely (see [Production Hardening](#production-hardening) below)
+<a id="development-vs-production"></a>
 
-## Development vs Production
+## 开发与生产
 
-### Development
+<a id="development"></a>
 
-The default `.env.example` is already development-ready:
+### 开发
+
+`.env.example` 已提供开发配置：
 
 ```env
 ENVIRONMENT=development
@@ -232,70 +176,86 @@ ADMIN_PASSWORD=Change-Me-Now-1!
 SECRET_KEY=insecure-secret-key-change-this-in-production
 ```
 
-Open <http://localhost:8000/admin>, log in, and you have access to Users and Tiers.
+访问 <http://localhost:8000/admin>，登录后管理 Users 和 Tiers。
 
-### Production Hardening
+<a id="production-hardening"></a>
 
-Three options, ordered by aggressiveness:
+### 生产加固
 
-1. **Disable entirely**
+三种方案：
+
+1. **完全禁用**：
+
     ```env
     ADMIN_ENABLED=false
     ```
-    Simplest. The admin panel never mounts. Run admin tasks via scripts (`uv run --no-sync python -m scripts.setup_initial_data`, custom one-offs) or temporary overrides.
 
-2. **Restrict at the proxy/load balancer**
-    Keep `ADMIN_ENABLED=true` but only allow the `/admin` path from your VPN's CIDR range or a specific IP allowlist. The app stays the same; the network blocks public access.
+    不挂载后台，改用 `uv run --no-sync python -m scripts.setup_initial_data`、一次性脚本或临时覆盖。
 
-3. **Use a strong unique password**
-    If you can't restrict at the network layer, treat `ADMIN_PASSWORD` like a production secret:
-    - Pull from a secrets manager at deploy time, never commit
-    - Rotate periodically
-    - Use a long, high-entropy password (the production security validator refuses to start the app if `SECRET_KEY` is the placeholder, or if the admin panel is enabled with empty credentials; weak admin passwords are logged as warnings)
+2. **代理或负载均衡限制**：保持启用，只允许 VPN CIDR 或指定 IP 访问 `/admin`。
+3. **强独立密码**：无法网络限制时，从密钥管理器部署注入，不提交，定期轮换，使用长高熵密码。生产校验器拒绝占位 `SECRET_KEY` 或启用后台却缺凭据，弱管理员密码仅告警。
 
-The Production Security Validator (`infrastructure/security/`) checks several things at startup when `ENVIRONMENT=production`, including that `ADMIN_USERNAME`/`ADMIN_PASSWORD` are set whenever `ADMIN_ENABLED=true`. Be deliberate about what you set.
+`infrastructure/security/` 在生产启动检查后台凭据等设置，应有意配置。
 
-## Environment Detection
+<a id="environment-detection"></a>
 
-The admin panel itself doesn't change behavior between `local` / `development` / `staging` / `production` — it's the same SQLAdmin app. What changes is the surrounding environment:
+## 环境检测
 
-- **Cookie security**: `https_only` follows `ENVIRONMENT` — off in `local` and `development`, on everywhere else
-- **Logging**: admin actions go through the same logger configured by `infrastructure/logging/`
-- **Session backend**: the panel's cookie is self-contained and signed, not the API's `SESSION_BACKEND` (Redis/memory). Restart-resilience for the *admin* login isn't relevant — admins re-log-in fine.
+后台核心仍是同一 SQLAdmin，环境差异包括：
 
-## Troubleshooting
+- **Cookie 安全**：`https_only` 在 local / development 关闭，其余开启。
+- **日志**：使用 `infrastructure/logging/` 的相同配置。
+- **存储**：后台 Cookie 自包含且签名，不使用 API 的 Redis / memory 会话后端。原文认为后台操作员重新登录成本较低。
 
-### `/admin` returns 404
-Check `ADMIN_ENABLED`, which is off unless you set it, and then `ADMIN_USERNAME` and `ADMIN_PASSWORD`: with either one empty the panel is not mounted, and the log says so at startup. Verify with:
+<a id="troubleshooting"></a>
+
+## 故障排查
+
+<a id="admin-returns-404"></a>
+
+### `/admin` 返回 404
+
+检查 `ADMIN_ENABLED` 及两项凭据。默认关闭，任一凭据为空也不挂载，启动日志有说明：
 
 ```bash
 cd backend
 uv run --no-sync python -c "from src.infrastructure.config.settings import get_settings; print(get_settings().ADMIN_ENABLED)"
 ```
 
-### Login form keeps rejecting credentials
-- Confirm `ADMIN_USERNAME` and `ADMIN_PASSWORD` in `backend/.env` match what you're typing
-- Restart the app after changing env vars (settings are read at startup)
-- If running in Docker, confirm the env vars are actually reaching the container (`docker compose exec api env | grep ADMIN_`)
+<a id="login-form-keeps-rejecting-credentials"></a>
 
-### Admin session keeps logging out
-The cookie expires 8 hours after login. To change that, edit `SESSION_MAX_AGE_SECONDS` in
-`src/interfaces/admin/auth.py`:
+### 登录持续失败
+
+- 核对 `backend/.env` 的用户名密码。
+- 修改后重启。
+- Docker 内检查变量是否传入：`docker compose exec api env | grep ADMIN_`。
+
+<a id="admin-session-keeps-logging-out"></a>
+
+### 会话频繁退出
+
+默认登录八小时后失效。需修改时编辑 `src/interfaces/admin/auth.py` 的 `SESSION_MAX_AGE_SECONDS`：
 
 ```python
 SESSION_MAX_AGE_SECONDS = 60 * 60 * 8
 ```
 
-### Wrong `engine` connection / "no such table"
-The admin uses the same engine as the API, which means it requires `CREATE_TABLES_ON_STARTUP=true` (the default in local and development) or applied Alembic migrations. If `/admin` shows views but they're empty / error, check:
+<a id="wrong-engine-connection-no-such-table"></a>
+<a id="wrong-engine-connection--no-such-table"></a>
+
+### 引擎错误或 “no such table”
+
+后台复用 API 引擎，需要 local / development 默认的自动建表，或已应用 Alembic 迁移。视图空白或报错时检查：
 
 ```bash
 cd backend
 uv run --no-sync alembic current
 ```
 
-## Next Steps
+<a id="next-steps"></a>
 
-- **[Adding Models](adding-models.md)** — Register your own models with the admin
-- **[User Management](user-management.md)** — Extending admin authentication
-- **[Production](../production.md)** — Production hardening checklist
+## 后续步骤
+
+- **[添加模型](adding-models.md)**：注册自定义视图。
+- **[用户管理](user-management.md)**：扩展后台认证。
+- **[生产环境](../production.md)**：加固清单。

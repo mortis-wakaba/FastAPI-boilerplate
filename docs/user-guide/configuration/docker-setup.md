@@ -1,16 +1,15 @@
-# Docker Setup
+<a id="docker-setup"></a>
 
-This page walks through running the boilerplate in containers. The Python project lives at
-`backend/`, and the image builds from the repository root: it needs the workspace's
-`pyproject.toml`, `uv.lock` and `cli/pyproject.toml` as well as `backend/`. You run
-`docker compose` from the repository root too.
+# Docker 配置
 
-!!! info "The compose file is generated, not shipped"
-    No compose file is committed. `bp deploy generate local` writes one at the repository root,
-    where it is gitignored, so regenerating it never conflicts with the repo. `prod` and `nginx`
-    write the other two stacks. See [CLI commands](../../cli/commands.md#bp-deploy-generate-mode).
+本页介绍如何在容器中运行模板。Python 项目位于 `backend/`，镜像从仓库根目录构建，需要 workspace 的 `pyproject.toml`、`uv.lock`、`cli/pyproject.toml` 和 `backend/`。`docker compose` 也在仓库根目录运行。
 
-## Quick Start
+!!! info "Compose 文件由命令生成"
+    仓库不提交 Compose 文件。`bp deploy generate local` 在仓库根目录生成文件，该文件已被 Git 忽略，因此重新生成不会与仓库冲突。`prod` 和 `nginx` 生成另外两种服务组合。见 [CLI 命令](../../cli/commands.md#bp-deploy-generate-mode)。
+
+<a id="quick-start"></a>
+
+## 快速开始
 
 ```bash
 cp backend/.env.example backend/.env
@@ -19,19 +18,21 @@ uv run --no-sync bp deploy generate local
 docker compose up --build
 ```
 
-## Dockerfile Architecture
+<a id="dockerfile-architecture"></a>
 
-`backend/Dockerfile` uses **four stages** built from `python:3.11-slim`:
+## Dockerfile 架构
 
-| Stage | Purpose |
-|-------|---------|
-| `requirements-stage` | Exports pinned requirements from `uv.lock` into `requirements-prod.txt` and `requirements-dev.txt`. Uses the official `astral-sh/uv` image to do this reliably. |
-| `base` | Installs system deps (gcc), production Python deps, and copies `src/` into the image. Sets `PYTHONPATH=/app:/app/src`. |
-| `dev` | Adds dev requirements and `tests/`, runs as a non-root `appuser`, starts with `fastapi dev interfaces/main.py --host 0.0.0.0 --port 8000`. |
-| `migrate` | Adds `migrations/` and `alembic.ini`. Default command is `alembic upgrade head`. Useful as a one-off job before the prod app starts. |
-| `prod` | Same as base, runs as non-root, starts with `fastapi run interfaces/main.py --host 0.0.0.0 --port 8000 --workers $WORKERS` (defaults to 1). |
+原文将 `backend/Dockerfile` 描述为基于 `python:3.11-slim` 的**四阶段**构建，下表实际列出了五个命名阶段：
 
-You select a stage with `--target` when building. The context is the repository root, because the Dockerfile copies `pyproject.toml`, `uv.lock`, `backend/` and `cli/pyproject.toml` from there:
+| 阶段 | 用途 |
+|------|------|
+| `requirements-stage` | 使用官方 `astral-sh/uv` 镜像，将 `uv.lock` 的锁定依赖导出为 `requirements-prod.txt` 和 `requirements-dev.txt` |
+| `base` | 安装 gcc 等系统依赖及生产 Python 依赖，复制 `src/`，设置 `PYTHONPATH=/app:/app/src` |
+| `dev` | 添加开发依赖和 `tests/`，使用非 root 用户 `appuser`，运行 `fastapi dev interfaces/main.py --host 0.0.0.0 --port 8000` |
+| `migrate` | 添加 `migrations/` 和 `alembic.ini`，默认执行 `alembic upgrade head`，适合作为生产应用启动前的一次性作业 |
+| `prod` | 基于 base，使用非 root 用户，运行 `fastapi run interfaces/main.py --host 0.0.0.0 --port 8000 --workers $WORKERS`，Worker 默认 1 个 |
+
+构建时使用 `--target` 选择阶段。上下文是仓库根目录，Dockerfile 从这里复制 `pyproject.toml`、`uv.lock`、`backend/` 和 `cli/pyproject.toml`：
 
 ```bash
 docker build --target dev -t fastapi-boilerplate:dev -f backend/Dockerfile .
@@ -39,10 +40,11 @@ docker build --target prod -t fastapi-boilerplate:prod -f backend/Dockerfile .
 docker build --target migrate -t fastapi-boilerplate:migrate -f backend/Dockerfile .
 ```
 
-## What `bp deploy generate local` Writes
+<a id="what-bp-deploy-generate-local-writes"></a>
 
-Four services, named `api`, `worker`, `postgres` and `redis`, with the API and the worker built
-from the `dev` stage and the source mounted for reload:
+## `bp deploy generate local` 生成的内容
+
+四个服务：`api`、`worker`、`postgres` 和 `redis`。API 与 Worker 从 `dev` 阶段构建，挂载源码以支持热重载：
 
 ```yaml
 services:
@@ -70,14 +72,13 @@ services:
         condition: service_healthy
 ```
 
-`worker` is the same image running `taskiq worker infrastructure.taskiq.worker:default_broker
---reload`; `postgres` and `redis` carry healthchecks that the other two wait on, and keep their
-data in the named volumes `postgres-data` and `redis-data`. `--api-port` moves the published port,
-and `--dry-run` prints the file without writing it.
+`worker` 使用相同镜像，运行 `taskiq worker infrastructure.taskiq.worker:default_broker --reload`。`postgres` 和 `redis` 提供健康检查，另外两个服务等待它们就绪；数据分别保存在命名卷 `postgres-data` 和 `redis-data`。`--api-port` 修改发布端口，`--dry-run` 只打印文件而不写入。
 
-### Matching `.env` for Compose
+<a id="matching-env-for-compose"></a>
 
-When the app talks to the other services in the Compose network, it uses **service names** as hostnames:
+### Compose 对应的 `.env`
+
+应用在 Compose 网络中访问其他服务时，使用**服务名**作为主机名：
 
 ```env
 # In backend/.env
@@ -87,40 +88,53 @@ RATE_LIMITER_REDIS_HOST=redis
 TASKIQ_REDIS_HOST=redis
 ```
 
-If you also use the host machine to reach Postgres/Redis directly (e.g. for a local dev tool), keep `localhost` working by exposing those ports as the example does (`127.0.0.1:5432:5432`, `127.0.0.1:6379:6379`). The `127.0.0.1:` prefix keeps a password-less dev database off the rest of the network.
+如果还需要从宿主机直接访问 Postgres / Redis，例如使用本地开发工具，可按示例映射 `127.0.0.1:5432:5432`、`127.0.0.1:6379:6379`，以便通过 `localhost` 访问。`127.0.0.1:` 前缀避免无密码开发数据库暴露到其他网络。
 
-## Service Reference
+<a id="service-reference"></a>
 
-### `api` — FastAPI Application
+## 服务参考
 
-Built from the `dev` Dockerfile stage. Runs `fastapi dev`, which auto-reloads on code changes. The
-volume mount on `./backend/src` makes the reload pick up your edits live.
+<a id="api-fastapi-application"></a>
+<a id="api--fastapi-application"></a>
 
-For production, generate the `prod` or `nginx` stack instead of editing this one: both build the
-`prod` stage, drop the mounts and run `fastapi run` with `--workers`.
+### `api`：FastAPI 应用
 
-### `worker` — Taskiq Worker
+从 Dockerfile 的 `dev` 阶段构建，运行支持自动重载的 `fastapi dev`。挂载 `./backend/src` 后，代码修改立即生效。
 
-The same image, running `taskiq worker infrastructure.taskiq.worker:default_broker --reload`. Scale
-it with `docker compose up --scale worker=3`.
+生产部署应生成 `prod` 或 `nginx` 配置，而非修改本地配置。两者均构建 `prod` 阶段，移除源码挂载，使用带 `--workers` 的 `fastapi run`。
 
-### `postgres` — PostgreSQL 16
+<a id="worker-taskiq-worker"></a>
+<a id="worker--taskiq-worker"></a>
 
-`postgres:16-alpine`. Reads `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` from
-`backend/.env`, and persists data in the named volume `postgres-data`.
+### `worker`：Taskiq Worker
 
-### `redis` — Redis 7
+使用同一镜像，运行 `taskiq worker infrastructure.taskiq.worker:default_broker --reload`。使用 `docker compose up --scale worker=3` 扩容。
 
-Used for cache (`CACHE_REDIS_DB=0`), rate limiting (`RATE_LIMITER_REDIS_DB=1`), sessions (`SESSION_REDIS_DB=2`), and the Taskiq broker (`TASKIQ_REDIS_DB=3`). The boilerplate uses different DB numbers so they don't interfere.
+<a id="postgres-postgresql-16"></a>
+<a id="postgres--postgresql-16"></a>
 
-## Optional Services
+### `postgres`：PostgreSQL 16
 
-Add these to the generated `docker-compose.yml` as needed. A regenerated file loses them, so keep
-your additions in a `docker-compose.override.yml` instead if you expect to regenerate.
+使用 `postgres:16-alpine`，从 `backend/.env` 读取 `POSTGRES_USER`、`POSTGRES_PASSWORD` 和 `POSTGRES_DB`，数据持久化到命名卷 `postgres-data`。
 
-### Migrations Job
+<a id="redis-redis-7"></a>
+<a id="redis--redis-7"></a>
 
-Run Alembic migrations before the app starts:
+### `redis`：Redis 7
+
+用于缓存（`CACHE_REDIS_DB=0`）、限流（`RATE_LIMITER_REDIS_DB=1`）、会话（`SESSION_REDIS_DB=2`）和 Taskiq 消息代理（`TASKIQ_REDIS_DB=3`）。模板使用不同 DB 编号避免相互干扰。
+
+<a id="optional-services"></a>
+
+## 可选服务
+
+按需加入生成的 `docker-compose.yml`。重新生成会丢失自定义内容，预计需要重新生成时，应将新增项放入 `docker-compose.override.yml`。
+
+<a id="migrations-job"></a>
+
+### 迁移作业
+
+应用启动前运行 Alembic 迁移：
 
 ```yaml
   migrate:
@@ -141,9 +155,11 @@ Run Alembic migrations before the app starts:
 docker compose run --rm migrate
 ```
 
-### Initial Setup Job
+<a id="initial-setup-job"></a>
 
-Create the first admin user and default tier on a fresh DB:
+### 初始化作业
+
+在新数据库上创建首个管理员和默认等级：
 
 ```yaml
   setup:
@@ -165,9 +181,11 @@ Create the first admin user and default tier on a fresh DB:
 docker compose run --rm setup
 ```
 
+<a id="pgadmin"></a>
+
 ### pgAdmin
 
-If you want a web UI for the database, add:
+需要数据库 Web 界面时添加：
 
 ```yaml
   pgadmin:
@@ -182,11 +200,13 @@ If you want a web UI for the database, add:
       - postgres
 ```
 
-Visit <http://localhost:5050>, log in, and add a server with hostname `postgres`, port `5432`, user `postgres` (or whatever you set in `backend/.env`).
+访问 <http://localhost:5050> 并登录，添加服务器：主机 `postgres`，端口 `5432`，用户 `postgres`，或使用 `backend/.env` 中设置的用户。
 
-### Memcached (alternative cache backend)
+<a id="memcached-alternative-cache-backend"></a>
 
-If you prefer Memcached over Redis:
+### Memcached（替代缓存后端）
+
+更倾向使用 Memcached 时：
 
 ```yaml
   memcached:
@@ -195,16 +215,18 @@ If you prefer Memcached over Redis:
       - "11211:11211"
 ```
 
-And in `.env`:
+在 `.env` 中设置：
 
 ```env
 CACHE_BACKEND=memcached
 CACHE_MEMCACHED_HOST=memcached
 ```
 
-The rate limiter is always Redis-backed, so it still needs the `redis` service.
+原文称限流器始终依赖 Redis，因此仍需要 `redis` 服务。
 
-### RabbitMQ (alternative Taskiq broker)
+<a id="rabbitmq-alternative-taskiq-broker"></a>
+
+### RabbitMQ（替代 Taskiq 消息代理）
 
 ```yaml
   rabbitmq:
@@ -217,14 +239,16 @@ The rate limiter is always Redis-backed, so it still needs the `redis` service.
       - "15672:15672"   # management UI
 ```
 
-In `.env`:
+在 `.env` 中设置：
 
 ```env
 TASKIQ_BROKER_TYPE=rabbitmq
 TASKIQ_RABBITMQ_HOST=rabbitmq
 ```
 
-## Common Commands
+<a id="common-commands"></a>
+
+## 常用命令
 
 ```bash
 # from the repository root, where the generated compose file lives
@@ -256,27 +280,33 @@ docker compose down
 docker compose down -v
 ```
 
-## Production-Style Setup
+<a id="production-style-setup"></a>
 
-For a more production-like local stack:
+## 接近生产的配置
 
-1. **Generate the `prod` stack**: `bp deploy generate prod` builds the `prod` stage, drops the
-   source mounts and runs `fastapi run --workers`.
-2. **Run migrations as a separate job** (the `migrate` service above) before the app starts.
-3. **Set the worker count**: `bp deploy generate prod --workers 4`, or `WORKERS=4` in
-   `backend/.env` (the `prod` command reads it).
-5. **Add a reverse proxy** if you need TLS — Caddy or Traefik are simpler to configure than nginx for single-host setups.
+需要更接近生产的本地服务组合时：
 
-## Troubleshooting
+1. **生成 `prod` 配置**：`bp deploy generate prod` 构建 `prod` 阶段，移除源码挂载并运行 `fastapi run --workers`。
+2. **应用启动前单独执行迁移**：使用上面的 `migrate` 服务。
+3. **设置 Worker 数量**：`bp deploy generate prod --workers 4`，或在 `backend/.env` 中设置 `WORKERS=4`，`prod` 命令会读取它。
+4. **需要 TLS 时添加反向代理**：单机部署中，Caddy 或 Traefik 比 nginx 更易配置。
 
-### Container won't start
+<a id="troubleshooting"></a>
+
+## 故障排查
+
+<a id="container-wont-start"></a>
+
+### 容器无法启动
 
 ```bash
 docker compose logs api
 docker compose build --no-cache api
 ```
 
-### Database connection refused
+<a id="database-connection-refused"></a>
+
+### 数据库拒绝连接
 
 ```bash
 # Is the database service up?
@@ -289,11 +319,15 @@ docker compose exec api python -c "import socket; print(socket.gethostbyname('po
 docker compose logs postgres
 ```
 
-### Code changes not picking up
+<a id="code-changes-not-picking-up"></a>
 
-Make sure you have the `./backend/src:/app/src` volume mount in the `api` service, and that `target: dev` is set (the `dev` stage uses `fastapi dev` which has reload enabled). The `prod` stage does **not** auto-reload.
+### 代码修改未生效
 
-### Port already in use
+确认 `api` 服务挂载了 `./backend/src:/app/src`，并设置 `target: dev`。`dev` 阶段运行开启重载的 `fastapi dev`，`prod` 阶段**不会**自动重载。
+
+<a id="port-already-in-use"></a>
+
+### 端口已被占用
 
 ```bash
 lsof -i :8000
@@ -302,7 +336,9 @@ ports:
   - "8080:8000"
 ```
 
-### Resetting everything
+<a id="resetting-everything"></a>
+
+### 全部重置
 
 ```bash
 docker compose down -v        # wipes volumes
@@ -310,28 +346,41 @@ docker compose build --no-cache
 docker compose up
 ```
 
-## Best Practices
+<a id="best-practices"></a>
 
-### Development
-- Use `target: dev` for live reload
-- Mount `./src` as a volume so edits don't require rebuilds
-- Expose Postgres/Redis ports for easy local debugging
-- Keep `.env` out of version control (it's already in `.gitignore`)
+## 最佳实践
 
-### Production
-- Use `target: prod` and remove dev volume mounts
-- Run the `migrate` stage as a separate job before launching the app
-- Set `ENVIRONMENT=production` to enable the security validator
-- Run as the non-root `appuser` (already set up in the Dockerfile)
-- Pin image tags (`postgres:16-alpine`, not `postgres:latest`)
+<a id="development"></a>
 
-### Security
-- Containers run as non-root in dev/prod stages
-- Don't expose the Postgres/Redis ports to public networks in production
-- Set strong `POSTGRES_PASSWORD`, Redis passwords (`CACHE_REDIS_PASSWORD`, etc.) and `SECRET_KEY` before deploying
+### 开发
 
-## See Also
+- 使用 `target: dev` 开启热重载。
+- 将 `./src` 挂载为卷，避免每次编辑都重建。
+- 暴露 Postgres / Redis 端口，便于本地调试。
+- 不提交 `.env`，它已被 `.gitignore` 忽略。
 
-- **[Environment Variables](environment-variables.md)** — Full env var reference
-- **[Settings Classes](settings-classes.md)** — How env vars become Python settings
-- **[Production](../production.md)** — Production deployment guide
+<a id="production"></a>
+
+### 生产
+
+- 使用 `target: prod` 并移除开发卷挂载。
+- 启动应用前将 `migrate` 阶段作为独立作业运行。
+- 设置 `ENVIRONMENT=production`，启用安全校验器。
+- 使用非 root 用户 `appuser`，Dockerfile 已配置。
+- 固定镜像标签，例如 `postgres:16-alpine`，而非 `postgres:latest`。
+
+<a id="security"></a>
+
+### 安全
+
+- dev / prod 阶段的容器均以非 root 用户运行。
+- 生产环境不向公网暴露 Postgres / Redis 端口。
+- 部署前设置强 `POSTGRES_PASSWORD`、Redis 密码（如 `CACHE_REDIS_PASSWORD`）和 `SECRET_KEY`。
+
+<a id="see-also"></a>
+
+## 另请参阅
+
+- **[环境变量](environment-variables.md)**：完整变量参考。
+- **[配置类](settings-classes.md)**：变量如何转换为 Python 配置。
+- **[生产环境](../production.md)**：生产部署指南。

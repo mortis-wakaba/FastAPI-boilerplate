@@ -1,117 +1,142 @@
-# Contributing to FastAPI-boilerplate
+<a id="contributing-to-fastapi-boilerplate"></a>
 
-Thank you for your interest in contributing to FastAPI-boilerplate! This guide is meant to make it easy for you to get started.
-Contributions are appreciated, even if just reporting bugs, documenting stuff or answering questions. To contribute with a feature:
+# 参与 FastAPI-boilerplate 贡献
 
-## Setting Up Your Development Environment
+感谢你关注 FastAPI-boilerplate！本指南帮助你开始贡献。报告问题、补充文档和回答问题同样有价值。新增功能可按以下流程进行。
 
-### Cloning the Repository
+<a id="setting-up-your-development-environment"></a>
 
-Start by forking and cloning the FastAPI-boilerplate repository:
+## 配置开发环境
 
-1. **Fork the Repository**: Begin by forking the project repository. You can do this by visiting https://github.com/igormagalhaesr/FastAPI-boilerplate and clicking the "Fork" button.
-1. **Create a Feature Branch**: Once you've forked the repo, create a branch for your feature by running `git checkout -b feature/fooBar`.
-1. **Testing Changes**: Ensure that your changes do not break existing functionality by running tests. From `backend/`, execute `uv run --no-sync pytest`.
+<a id="cloning-the-repository"></a>
 
-### Using uv for Dependency Management
+### 克隆仓库
 
-FastAPI-boilerplate uses uv for managing dependencies. If you don't have uv installed, follow the instructions on the [official uv website](https://docs.astral.sh/uv/).
+先 Fork 并克隆 FastAPI-boilerplate：
 
-Once uv is installed, navigate to the cloned repository and install the dependencies:
+1. **Fork 仓库**：访问 https://github.com/igormagalhaesr/FastAPI-boilerplate 并点击 Fork。
+2. **创建功能分支**：运行 `git checkout -b feature/fooBar`。
+3. **测试修改**：从 `backend/` 执行 `uv run --no-sync pytest`，确认没有破坏现有功能。
+
+<a id="using-uv-for-dependency-management"></a>
+
+### 使用 uv 管理依赖
+
+项目使用 uv，安装方式见 [uv 官方文档](https://docs.astral.sh/uv/)。
+
+安装后进入克隆的仓库，安装依赖：
 
 ```sh
 cd FastAPI-boilerplate
 uv sync --all-packages --all-extras
 ```
 
-`--all-packages` installs both workspace members, and `--all-extras` brings in the
-dev tools: a plain `uv sync` leaves you without ruff, mypy or pytest.
+`--all-packages` 安装两个 workspace 成员，`--all-extras` 添加开发工具。单独运行 `uv sync` 不会保留 ruff、mypy 和 pytest 等开发依赖。
 
-### Activating the Virtual Environment
+<a id="activating-the-virtual-environment"></a>
 
-uv creates a virtual environment for your project. Activate it using:
+### 激活虚拟环境
+
+uv 会创建项目虚拟环境，可通过以下命令激活：
 
 ```sh
 source .venv/bin/activate
 ```
 
-Alternatively, you can run commands directly with `uv run` without activating the environment:
+也可不激活，直接用 `uv run`：
 
 ```sh
 uv run --no-sync python your_script.py
 ```
 
-## Making Contributions
+<a id="making-contributions"></a>
 
-### Coding Standards
+## 开发贡献
 
-- Follow PEP 8 guidelines.
-- Write meaningful tests for new features or bug fixes.
+<a id="coding-standards"></a>
 
-### Testing with Pytest
+### 编码规范
 
-FastAPI-boilerplate uses pytest for testing. Run tests from `backend/`:
+- 遵循 PEP 8。
+- 为新功能或缺陷修复编写有意义的测试。
+
+<a id="testing-with-pytest"></a>
+
+### 使用 pytest 测试
+
+从 `backend/` 运行：
 
 ```sh
 cd backend
 uv run --no-sync pytest
 ```
 
-`--no-sync` skips uv's implicit sync, so the command starts straight away and neither the environment nor the lockfile changes under you. A plain `uv run` installs what the lockfile needs and removes nothing; a plain `uv sync`, without `--all-extras`, is what uninstalls the dev tools.
+`--no-sync` 跳过 uv 的隐式同步，立即执行命令，不改变环境和锁文件。普通 `uv run` 会按锁文件补充依赖，但不删除已有包；不带 `--all-extras` 的 `uv sync` 则会移除开发工具。
 
-### Linting
+<a id="linting"></a>
 
-Use mypy for type checking:
+### 静态检查
+
+使用 mypy 检查类型：
 
 ```sh
 mypy src scripts migrations tests
 ```
 
-Use ruff for style:
+使用 ruff 检查和格式化代码：
 
 ```sh
 ruff check --fix
 ruff format
 ```
 
-Ensure your code passes linting before submitting.
+提交前确保检查通过。
 
-### Using pre-commit for Better Code Quality
+<a id="using-pre-commit-for-better-code-quality"></a>
 
-It helps in identifying simple issues before submission to code review. By running automated checks, pre-commit can ensure code quality and consistency.
+### 使用 pre-commit 改善代码质量
 
-1. **Set Up Pre-commit Hooks**:
-   Set up the hooks with `pre-commit install`. This command will install hooks into your .git/ directory which will automatically check your commits for issues.
-1. **Committing Your Changes**:
-   After making your changes, use `git commit -am 'Add some fooBar'` to commit them. Pre-commit will run automatically on your files when you commit, ensuring that they meet the required standards.
-   Note: If pre-commit identifies issues, it may block your commit. Fix these issues and commit again. This ensures that all contributions are of high quality.
-1. **Pushing Changes and Creating Pull Request**:
-   Push your changes to the branch using `git push origin feature/fooBar`.
-   Visit your fork on GitHub and create a new Pull Request to the main repository.
+pre-commit 在代码审查前自动发现常见问题，保持质量和风格一致。
 
-### Additional Notes
+1. **安装钩子**：执行 `pre-commit install`，将钩子安装到 `.git/`，之后提交自动检查。
+2. **提交修改**：原文示例为 `git commit -am 'Add some fooBar'`，提交时运行 pre-commit。检查可能阻止提交，应修复后重新提交。
+3. **推送并创建 PR**：执行 `git push origin feature/fooBar`，在 GitHub 的 Fork 中向主仓库发起 Pull Request。
 
-**Stay Updated**: Keep your fork updated with the main repository to avoid merge conflicts. Regularly fetch and merge changes from the upstream repository.
-**Adhere to Project Conventions**: Follow the coding style, conventions, and commit message guidelines of the project.
-**Open Communication**: Feel free to ask questions or discuss your ideas by opening an issue or in discussions.
+<a id="additional-notes"></a>
 
-## Submitting Your Contributions
+### 补充说明
 
-### Creating a Pull Request
+**保持同步**：定期获取并合并上游变更，减少冲突。
 
-After making your changes:
+**遵守项目约定**：遵循代码风格、规范和提交消息要求。
 
-- Push your changes to your fork.
-- Open a pull request with a clear description of your changes.
-- Update the README.md if necessary.
+**公开交流**：通过 Issue 或 Discussions 提问和讨论。
 
-### Code Reviews
+<a id="submitting-your-contributions"></a>
 
-- Address any feedback from code reviews.
-- Once approved, your contributions will be merged into the main branch.
+## 提交贡献
 
-## Code of Conduct
+<a id="creating-a-pull-request"></a>
 
-Please adhere to our [Code of Conduct](CODE_OF_CONDUCT.md) to maintain a welcoming and inclusive environment.
+### 创建 Pull Request
 
-Thank you for contributing to FastAPI-boilerplate🚀
+修改完成后：
+
+- 推送到自己的 Fork。
+- 创建描述清晰的 PR。
+- 必要时更新 README.md。
+
+<a id="code-reviews"></a>
+
+### 代码审查
+
+- 处理审查反馈。
+- 通过后合并到主分支。
+
+<a id="code-of-conduct"></a>
+
+## 行为准则
+
+请遵守[行为准则](CODE_OF_CONDUCT.md)，共同维护友好、包容的社区。
+
+感谢你为 FastAPI-boilerplate 作出贡献！🚀

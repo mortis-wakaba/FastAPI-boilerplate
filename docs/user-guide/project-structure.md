@@ -1,8 +1,12 @@
-# Project Structure
+<a id="project-structure"></a>
 
-The codebase follows a three-layer architecture (**interfaces / infrastructure / modules**) with **vertical-slice modules** — each feature owns its models, schemas, CRUD, service, and routes in one folder. This guide explains how everything is organized and where to put new code.
+# 项目结构
 
-## Repository Root
+代码库采用三层架构（**interfaces / infrastructure / modules**），并按业务功能**纵向划分模块**：每个功能的模型、Schema、CRUD、服务和路由集中在同一个目录。本指南介绍代码组织方式及新增代码的放置位置。
+
+<a id="repository-root"></a>
+
+## 仓库根目录
 
 ```text
 fastapi-boilerplate/
@@ -13,9 +17,11 @@ fastapi-boilerplate/
 └── LICENSE.md
 ```
 
-The Python project lives entirely under `backend/`. If you ever add a frontend, it would sit alongside as `frontend/`.
+Python 项目全部位于 `backend/`。将来添加前端时，可在同级创建 `frontend/`。
 
-## Backend Layout
+<a id="backend-layout"></a>
+
+## 后端结构
 
 ```text
 backend/
@@ -43,17 +49,21 @@ backend/
 └── tests/                    # Test suite (unit + integration)
 ```
 
-### Configuration Files
+<a id="configuration-files"></a>
 
-| File | Purpose |
-|------|---------|
-| `pyproject.toml` | Project metadata, dependencies (`[project]`), tooling config (ruff, mypy, pytest) |
-| `uv.lock` | Locks exact dependency versions for reproducible installs |
-| `Dockerfile` | Multi-stage build: requirements export → base → dev/prod/migrate stages |
-| `alembic.ini` | Alembic settings (script location, logging) |
-| `.env.example` | Documented reference of every environment variable |
+### 配置文件
 
-## The Three Layers (`src/`)
+| 文件 | 用途 |
+|------|------|
+| `pyproject.toml` | 项目元数据、依赖（`[project]`）、ruff / mypy / pytest 配置 |
+| `uv.lock` | 锁定精确依赖版本，实现可重复安装 |
+| `Dockerfile` | 多阶段构建：导出依赖 → 基础镜像 → dev / prod / migrate 阶段 |
+| `alembic.ini` | Alembic 配置，包括脚本位置和日志 |
+| `.env.example` | 全部环境变量的说明与参考 |
+
+<a id="the-three-layers-src"></a>
+
+## 三层架构（`src/`）
 
 ```text
 src/
@@ -63,14 +73,16 @@ src/
 └── wiring/                   # WHICH features this project selected
 ```
 
-The flow is **interfaces → modules → infrastructure**:
+调用方向是 **interfaces → modules → infrastructure**：
 
-- `interfaces` mounts routers, middleware, and the admin UI.
-- `modules` express domain features. Each one is self-contained.
-- `infrastructure` provides the cross-cutting plumbing every layer above can reach for.
-- `wiring` is the composition root: the one place that names every feature.
+- `interfaces` 挂载路由、中间件和管理界面。
+- `modules` 表达业务功能，各模块独立完整。
+- `infrastructure` 提供上层共用的基础设施。
+- `wiring` 是组装入口，是唯一集中列出所有功能的位置。
 
-Modules don't import each other directly except for the shared `common` module. Interfaces don't contain business logic. Infrastructure doesn't know about specific features.
+除共享的 `common` 模块外，业务模块之间不直接导入。接口层不包含业务逻辑，基础设施层不感知具体业务功能。
+
+<a id="srcinterfaces"></a>
 
 ### `src/interfaces/`
 
@@ -88,7 +100,9 @@ interfaces/
     └── mixins.py
 ```
 
-`main.py` is the entry point — `uv run --no-sync fastapi dev src/interfaces/main.py` starts here; it also serves `/health` and `/health/ready`. The `v1/__init__.py` aggregator mounts the routers `wiring/app.py` lists, so it never names a feature. Each feature's admin views live with the feature, in `modules/<feature>/admin.py`.
+`main.py` 是入口，`uv run --no-sync fastapi dev src/interfaces/main.py` 从这里启动，并提供 `/health` 和 `/health/ready`。`v1/__init__.py` 按 `wiring/app.py` 中的列表挂载路由，不直接列举功能。每个功能的管理视图与功能放在一起，位于 `modules/<feature>/admin.py`。
+
+<a id="srcinfrastructure"></a>
 
 ### `src/infrastructure/`
 
@@ -119,9 +133,12 @@ infrastructure/
 └── logging/                  # Centralized logging configuration
 ```
 
-`infrastructure/auth/routes.py` is intentionally placed here (instead of in a `modules/auth/` folder) because authentication is structural — every feature relies on it. It's still a feature that can be removed: everything accounts owns lives under `auth/` and `modules/user/`.
+认证是各功能共同依赖的基础能力，因此 `infrastructure/auth/routes.py` 有意放在这里，而不是 `modules/auth/`。它仍是可以移除的功能：accounts 拥有的内容全部位于 `auth/` 和 `modules/user/`。
 
-### `src/modules/` — Vertical-Slice Features
+<a id="srcmodules-vertical-slice-features"></a>
+<a id="srcmodules--vertical-slice-features"></a>
+
+### `src/modules/`：按功能纵向划分
 
 ```text
 modules/
@@ -145,25 +162,30 @@ modules/
 └── api_keys/                 # API keys, key usage, key permissions
 ```
 
-Each module is **self-contained**: drop it in, drop it out, with minimal blast radius. `src/wiring/` is the only place that knows which modules this project selected, and `tools/removal_drill.py` checks that dropping one out really works — see [Composable Features](composable-features.md).
+每个模块都**独立完整**，添加或移除时尽量减少对其他部分的影响。只有 `src/wiring/` 知道项目选择了哪些模块；`tools/removal_drill.py` 验证移除后项目确实仍可工作，见[可组合功能](composable-features.md)。
 
-### Common Module Files
+<a id="common-module-files"></a>
 
-| File | Purpose |
-|------|---------|
-| `models.py` | SQLAlchemy ORM models (table schema) |
-| `schemas.py` | Pydantic request/response models |
-| `crud.py` | FastCRUD instances for the model |
-| `service.py` | Business logic — orchestrates CRUD calls, applies rules |
-| `routes.py` | `APIRouter` with the module's endpoints |
-| `permissions.py` | `StrEnum` of the module's permissions, registered with `@register_permissions` (optional) |
-| `enums.py` | StrEnum types if the module needs them (optional) |
-| `settings.py` | The module's settings mixin, composed in `wiring/settings.py` (optional) |
-| `contrib.py` | Columns and schema fields the module adds to another model (optional) |
-| `hooks.py` | What the module contributes to another feature's extension points (optional) |
-| `admin.py` | The module's SQLAdmin views, listed in `wiring/admin.py` (optional) |
+### 模块常见文件
 
-### `src/wiring/` — The Composition Root
+| 文件 | 用途 |
+|------|------|
+| `models.py` | SQLAlchemy ORM 模型，即表结构 |
+| `schemas.py` | Pydantic 请求与响应模型 |
+| `crud.py` | 模型对应的 FastCRUD 实例 |
+| `service.py` | 业务逻辑，编排 CRUD 调用并应用业务规则 |
+| `routes.py` | 包含模块接口的 `APIRouter` |
+| `permissions.py` | 可选：模块权限的 `StrEnum`，通过 `@register_permissions` 注册 |
+| `enums.py` | 可选：模块需要的 StrEnum 类型 |
+| `settings.py` | 可选：模块配置 mixin，由 `wiring/settings.py` 组合 |
+| `contrib.py` | 可选：模块为其他模型添加的列和 Schema 字段 |
+| `hooks.py` | 可选：模块为其他功能扩展点提供的内容 |
+| `admin.py` | 可选：模块的 SQLAdmin 视图，在 `wiring/admin.py` 中列出 |
+
+<a id="srcwiring-the-composition-root"></a>
+<a id="srcwiring--the-composition-root"></a>
+
+### `src/wiring/`：组装入口
 
 ```text
 wiring/
@@ -179,9 +201,11 @@ wiring/
 └── admin.py                  # ADMIN_VIEWS (absent without the admin feature)
 ```
 
-These files are imports and names only — no decisions — so ruff, mypy and your IDE see exactly what the project wired. They are what `tools/removal_drill.py` writes for the features this project selected, and a test compares the two, so removing a feature means deleting its folders and regenerating these lines rather than only editing them. [Composable Features](composable-features.md) covers the contribution shapes and the removal drill.
+这些文件只包含导入和名称，不包含决策逻辑，因此 ruff、mypy 和 IDE 都能清楚看到项目组装了哪些内容。`tools/removal_drill.py` 根据所选功能生成这些文件，并由测试对比。因此移除功能意味着删除对应目录并重新生成这些内容，而非只手动编辑导入。[可组合功能](composable-features.md)介绍了扩展方式和移除验证。
 
-## Migrations (`backend/migrations/`)
+<a id="migrations-backendmigrations"></a>
+
+## 迁移（`backend/migrations/`）
 
 ```text
 migrations/
@@ -190,14 +214,16 @@ migrations/
 └── versions/                 # One file per migration revision
 ```
 
-Run from `backend/`:
+在 `backend/` 中运行：
 
 ```bash
 uv run --no-sync alembic revision --autogenerate -m "add foo"
 uv run --no-sync alembic upgrade head
 ```
 
-## Scripts (`backend/scripts/`)
+<a id="scripts-backendscripts"></a>
+
+## 脚本（`backend/scripts/`）
 
 ```text
 scripts/
@@ -212,26 +238,22 @@ scripts/
 └── prune_key_usage.py        # Deletes the API-key usage rows past KEY_USAGE_RETENTION_DAYS
 ```
 
-The most common entry point is `setup_initial_data` which calls all three.
+最常用的入口是 `setup_initial_data`，它会调用上述三个脚本。
 
 ```bash
 uv run --no-sync python -m scripts.setup_initial_data
 ```
 
-Each script also runs on its own, from `backend/`:
+每个脚本也可在 `backend/` 下独立运行：
 
 ```bash
 uv run --no-sync python scripts/create_first_tier.py
 uv run --no-sync python scripts/create_first_superuser.py
 ```
 
-A script that can't do its job - admin settings that don't describe an account, a password the
-policy refuses, a username someone already has, a database it can't reach - logs one line and exits
-`1`.
+脚本无法完成操作时，例如管理员配置不完整、密码不符合策略、用户名已被占用或数据库不可达，会记录一行日志并以退出码 `1` 结束。
 
-`cleanup_api_key_json.py` is not part of setting a project up: it repairs API key rows written by a
-version that stored a JSON null in `permissions` or `usage_limits`, which every validated read of
-such a row answers `500` on. Run it once after upgrading, from `backend/`:
+`cleanup_api_key_json.py` 不属于新项目初始化步骤。它修复旧版本在 `permissions` 或 `usage_limits` 中写入 JSON null 的 API 密钥记录；读取这些记录并校验时会返回 `500`。升级后在 `backend/` 下执行一次：
 
 ```bash
 # from backend/ on the host
@@ -241,12 +263,9 @@ uv run --no-sync python scripts/cleanup_api_key_json.py
 docker compose exec api python -m scripts.cleanup_api_key_json
 ```
 
-It reports how many rows each column was repaired in, changes nothing else, and is safe to run
-again.
+脚本报告每列修复的行数，不修改其他内容，可以重复运行。
 
-`canonicalize_emails.py` is the same kind of one-off, for a database written before addresses were
-stored canonically. It rewrites every address into the trimmed, lowercased form every lookup uses
-and adds the `ix_user_email_lower` unique index over it:
+`canonicalize_emails.py` 也是一次性修复脚本，用于尚未统一邮箱格式的旧数据库。它把邮箱改为所有查询使用的形式：去除首尾空白并转为小写，同时创建唯一索引 `ix_user_email_lower`：
 
 ```bash
 # from backend/ on the host
@@ -256,11 +275,11 @@ uv run --no-sync python scripts/canonicalize_emails.py
 docker compose exec api python -m scripts.canonicalize_emails
 ```
 
-While two accounts hold one address once case and whitespace are ignored it changes nothing, names
-those addresses and exits `1`: which account keeps the address is a decision for a person. Merge or
-rename them and run it again.
+如果忽略大小写和空白后两个账户使用同一邮箱，脚本不会修改数据，而会列出冲突地址并以退出码 `1` 结束。应由人工决定邮箱归属，合并或改名后重新运行。
 
-## Tests (`backend/tests/`)
+<a id="tests-backendtests"></a>
+
+## 测试（`backend/tests/`）
 
 ```text
 tests/
@@ -273,7 +292,7 @@ tests/
 └── integration/              # Integration tests (real Postgres via testcontainers)
 ```
 
-Run from `backend/`:
+在 `backend/` 中运行：
 
 ```bash
 uv run --no-sync pytest tests/unit         # fast, no Docker
@@ -281,72 +300,85 @@ uv run --no-sync pytest tests/integration  # spins up Postgres in Docker via tes
 uv run --no-sync pytest                    # everything
 ```
 
-## Architectural Patterns
+<a id="architectural-patterns"></a>
 
-### Three-Layer Architecture
+## 架构模式
 
-1. **Interfaces** (`interfaces/`) - HTTP routes, admin UI, the FastAPI app instance
-2. **Modules** (`modules/`) - Domain features as vertical slices
-3. **Infrastructure** (`infrastructure/`) - Cross-cutting plumbing (DB, cache, auth, queue, config, logging)
+<a id="three-layer-architecture"></a>
 
-Dependencies flow downward: interfaces depend on modules and infrastructure; modules depend on infrastructure (and `modules/common`). Infrastructure has no upward dependencies.
+### 三层架构
 
-`wiring/` sits above all three: it imports from every layer, and the layers import *only its lists* — `api/v1/__init__.py` reads `ROUTER_MOUNTS`, `auth/authorization.py` reads `PERMISSION_SOURCES`, `modules/user/models.py` reads `UserModelExtensions`, and so on. That's how a feature reaches another one without importing it.
+1. **接口层**（`interfaces/`）：HTTP 路由、管理界面和 FastAPI 应用实例。
+2. **业务模块层**（`modules/`）：按业务功能纵向划分的模块。
+3. **基础设施层**（`infrastructure/`）：数据库、缓存、认证、队列、配置和日志等共用能力。
 
-### Vertical Slices
+依赖向下流动：接口层依赖模块层和基础设施层；模块层依赖基础设施层及 `modules/common`；基础设施层不反向依赖上层。
 
-Each `modules/<feature>/` folder owns the entire stack for that feature. Adding a new feature means adding **one** new folder, not editing five separate top-level directories.
+`wiring/` 位于三层之上，从各层导入内容；其他层只读取它提供的列表。例如 `api/v1/__init__.py` 读取 `ROUTER_MOUNTS`，`auth/authorization.py` 读取 `PERMISSION_SOURCES`，`modules/user/models.py` 读取 `UserModelExtensions`。因此一个功能可以扩展另一个功能，而无需直接导入它。
 
-### Dependency Injection
+<a id="vertical-slices"></a>
 
-FastAPI's `Depends` is used throughout:
+### 按业务功能纵向划分
 
-- **Database session** — `Depends(async_session)` from `infrastructure.database.session`
-- **Current user** — `Depends(get_current_user)` from `infrastructure.auth.dependencies`
-- **Superuser only** — `Depends(get_current_superuser)`
-- **Permission required** — `require_permissions("user.read")` in the route's `dependencies` list
-- **Service instances** — Each module's `routes.py` defines its own `get_<feature>_service()` factory
+每个 `modules/<feature>/` 目录拥有对应功能的完整实现。添加新功能通常意味着新增**一个**目录，而非分别修改五个顶层目录。
 
-`infrastructure/dependencies.py` holds the one alias every project has, `AsyncSessionDep`. The aliases that resolve a caller ship with accounts, in `infrastructure/auth/deps.py` — `CurrentUserDep`, `CurrentSuperUserDep`, `OptionalUserDep`, `CurrentPrincipalDep` (the crudauth `Principal`) and `CurrentPermissionsDep` (the caller's effective permissions, resolved once per request).
+<a id="dependency-injection"></a>
 
-### Configuration
+### 依赖注入
 
-Configuration is loaded from `.env` and assembled from mixins:
+项目广泛使用 FastAPI 的 `Depends`：
 
-- The core mixins (`DatabaseSettings`, `CORSSettings`, `SecuritySettings`, …) live in `infrastructure/config/base.py`
-- Each feature ships its own mixin next to its code (`infrastructure/cache/settings.py`, `modules/tier/settings.py`, …)
-- `wiring/settings.py` composes the selected ones into `Settings`, with the core last so a feature can override a core default
-- `infrastructure/config/settings.py` is the stable facade: import `settings` or `get_settings()` from there whatever features are installed
+- **数据库会话**：`infrastructure.database.session` 中的 `Depends(async_session)`。
+- **当前用户**：`infrastructure.auth.dependencies` 中的 `Depends(get_current_user)`。
+- **仅超级用户**：`Depends(get_current_superuser)`。
+- **权限要求**：在路由的 `dependencies` 列表中使用 `require_permissions("user.read")`。
+- **服务实例**：每个模块的 `routes.py` 定义自己的 `get_<feature>_service()` 工厂。
 
-### Error Handling
+`infrastructure/dependencies.py` 保存所有项目都需要的别名 `AsyncSessionDep`。解析调用者身份的别名随 accounts 功能提供，位于 `infrastructure/auth/deps.py`：`CurrentUserDep`、`CurrentSuperUserDep`、`OptionalUserDep`、`CurrentPrincipalDep`（crudauth 的 `Principal`）和 `CurrentPermissionsDep`（每个请求只解析一次的调用者有效权限）。
 
-- Domain exceptions in `modules/common/exceptions.py` — `DomainError` and the few shapes every feature shares (`ResourceNotFoundError`, `ResourceExistsError`, `ValidationError`, `PermissionDeniedError`, `PersistenceError`)
-- A feature subclasses those for its own errors and sets `public_detail` to choose what the client is told, so the mapping never names a feature's exceptions
-- HTTP-shaped exceptions in `infrastructure/http_exceptions.py`
-- `modules/common/utils/error_handler.register_exception_handlers(app)` installs one handler that maps any `DomainError` through `map_exception`, so routes raise and don't translate
+<a id="configuration"></a>
 
-## Adding a New Feature
+### 配置
 
-The recommended flow:
+配置从 `.env` 读取，并通过 mixin 组装：
 
-1. **Create the module folder**: `mkdir backend/src/modules/widgets`
-2. **Define the model**: `backend/src/modules/widgets/models.py`
-3. **Add schemas**: `backend/src/modules/widgets/schemas.py` - a write schema inherits
-   `EncodableText` from `modules/common/schemas.py`, which refuses text no column can hold (a lone
-   surrogate, a NUL character) at any depth; `tests/unit/interfaces/test_request_text.py` sweeps
-   every route body for it
-4. **Wrap with FastCRUD**: `backend/src/modules/widgets/crud.py`
-5. **Write the service**: `backend/src/modules/widgets/service.py`
-6. **Expose routes**: `backend/src/modules/widgets/routes.py`
-7. **Register the router**: add a `RouterMount` to `ROUTER_MOUNTS` in `backend/src/wiring/app.py`
-8. **Wire the rest of it**: its settings mixin in `wiring/settings.py`, its hook contributions in `wiring/hooks.py`, its admin views in `wiring/admin.py`, its fixtures in `tests/wiring.py` — whichever it has
-9. **Add it to the removal drill**: list its paths in `tools/removal_drill.py` so a build without it is checked
-10. **Generate a migration**: `uv run --no-sync alembic revision --autogenerate -m "add widgets"`
-11. **Apply**: `uv run --no-sync alembic upgrade head`
+- 核心 mixin（`DatabaseSettings`、`CORSSettings`、`SecuritySettings` 等）位于 `infrastructure/config/base.py`。
+- 各功能在自己的代码旁提供 mixin，如 `infrastructure/cache/settings.py`、`modules/tier/settings.py`。
+- `wiring/settings.py` 将所选 mixin 组合为 `Settings`；核心配置放在最后，允许功能覆盖核心默认值。
+- `infrastructure/config/settings.py` 是稳定入口，无论安装了哪些功能，都从这里导入 `settings` 或 `get_settings()`。
 
-See [Development Guide](development.md) for a full walkthrough.
+<a id="error-handling"></a>
 
-## Data Flow
+### 错误处理
+
+- `modules/common/exceptions.py` 定义领域异常：`DomainError` 以及各功能共用的 `ResourceNotFoundError`、`ResourceExistsError`、`ValidationError`、`PermissionDeniedError`、`PersistenceError`。
+- 功能通过继承这些异常定义自己的错误，并用 `public_detail` 指定向客户端公开的信息，映射层无需列举各功能的异常。
+- `infrastructure/http_exceptions.py` 定义 HTTP 异常。
+- `modules/common/utils/error_handler.register_exception_handlers(app)` 注册统一处理器，通过 `map_exception` 映射任意 `DomainError`；路由只抛出异常，无需自行转换。
+
+<a id="adding-a-new-feature"></a>
+
+## 添加新功能
+
+推荐步骤：
+
+1. **创建模块目录**：`mkdir backend/src/modules/widgets`。
+2. **定义模型**：`backend/src/modules/widgets/models.py`。
+3. **添加 Schema**：`backend/src/modules/widgets/schemas.py`。写入 Schema 继承 `modules/common/schemas.py` 中的 `EncodableText`，拒绝任意嵌套层级中无法存入数据库列的文本，如孤立代理字符和 NUL 字符；`tests/unit/interfaces/test_request_text.py` 会检查所有路由请求体。
+4. **封装 FastCRUD**：`backend/src/modules/widgets/crud.py`。
+5. **编写服务**：`backend/src/modules/widgets/service.py`。
+6. **提供路由**：`backend/src/modules/widgets/routes.py`。
+7. **注册路由**：在 `backend/src/wiring/app.py` 的 `ROUTER_MOUNTS` 中添加 `RouterMount`。
+8. **组装其他内容**：按需在 `wiring/settings.py` 添加配置 mixin，在 `wiring/hooks.py` 添加钩子，在 `wiring/admin.py` 添加管理视图，在 `tests/wiring.py` 添加 fixture。
+9. **加入移除验证**：在 `tools/removal_drill.py` 中列出路径，检查不包含该功能的构建。
+10. **生成迁移**：`uv run --no-sync alembic revision --autogenerate -m "add widgets"`。
+11. **应用迁移**：`uv run --no-sync alembic upgrade head`。
+
+完整示例见[开发指南](development.md)。
+
+<a id="data-flow"></a>
+
+## 数据流
 
 ```text
 HTTP Request
@@ -360,4 +392,4 @@ HTTP Request
 HTTP Response ← Pydantic schema ← service ← CRUD result ← DB query
 ```
 
-This layering keeps HTTP concerns out of business logic, and business logic out of data access — making the codebase straightforward to navigate, test, and extend.
+这种分层将 HTTP 处理、业务逻辑和数据访问分开，便于阅读、测试与扩展。

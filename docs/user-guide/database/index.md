@@ -1,18 +1,24 @@
-# Database Layer
+<a id="database-layer"></a>
 
-Learn how to work with the database layer in the FastAPI Boilerplate. This section covers everything you need to store and retrieve data effectively.
+# 数据库层
 
-## What You'll Learn
+本章介绍 FastAPI Boilerplate 的数据库层，以及高效存储和读取数据的方法。
 
-- **[Models](models.md)** - Define database tables with SQLAlchemy 2.0
-- **[Schemas](schemas.md)** - Validate and serialize data with Pydantic
-- **[CRUD Operations](crud.md)** - Database access via FastCRUD
-- **[Migrations](migrations.md)** - Manage schema changes with Alembic
-- **[Neon](neon.md)** - Run on serverless Postgres instead of a local container
+<a id="what-youll-learn"></a>
 
-## Quick Overview
+## 内容概览
 
-The boilerplate splits the data layer across each feature module so a feature owns its full stack:
+- **[模型](models.md)**：通过 SQLAlchemy 2.0 定义数据库表。
+- **[Schema](schemas.md)**：通过 Pydantic 校验和序列化数据。
+- **[CRUD 操作](crud.md)**：通过 FastCRUD 访问数据库。
+- **[迁移](migrations.md)**：通过 Alembic 管理结构变更。
+- **[Neon](neon.md)**：使用无服务器 Postgres 替代本地容器。
+
+<a id="quick-overview"></a>
+
+## 快速概览
+
+数据层按功能拆分，各模块拥有完整的数据处理栈：
 
 ```python
 # modules/user/routes.py — request comes in, validated by UserCreate
@@ -29,7 +35,9 @@ async def create_user(
 # modules/user/models.py  — User SQLAlchemy model
 ```
 
-## Architecture
+<a id="architecture"></a>
+
+## 架构
 
 ```text
 HTTP Request
@@ -47,13 +55,17 @@ SQLAlchemy Model     (modules/<feature>/models.py)
 PostgreSQL
 ```
 
-The service layer holds business rules (permission checks, multi-step orchestration). FastCRUD handles the boilerplate query plumbing. The model defines the table.
+服务层包含权限检查、多步骤编排等业务规则；FastCRUD 处理通用查询；模型定义表结构。
 
-## Key Components
+<a id="key-components"></a>
 
-### SQLAlchemy 2.0 Models
+## 关键组件
 
-Models inherit from `Base` (a `DeclarativeBase` + `MappedAsDataclass` combination) and the relevant mixins:
+<a id="sqlalchemy-20-models"></a>
+
+### SQLAlchemy 2.0 模型
+
+模型继承 `Base`（由 `DeclarativeBase` 和 `MappedAsDataclass` 组合），并按需添加 mixin：
 
 ```python
 # modules/user/models.py
@@ -73,15 +85,17 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
     hashed_password: Mapped[str] = mapped_column(String(100))
 ```
 
-Available mixins from `infrastructure/database/models.py`:
+`infrastructure/database/models.py` 提供：
 
-- `TimestampMixin` — adds `created_at` and `updated_at`
-- `SoftDeleteMixin` — adds `is_deleted` and `deleted_at`
-- `UUIDMixin` — UUID primary key (alternative to integer ids)
+- `TimestampMixin`：添加 `created_at` 和 `updated_at`。
+- `SoftDeleteMixin`：添加 `is_deleted` 和 `deleted_at`。
+- `UUIDMixin`：提供 UUID 主键，替代整数 ID。
 
-### Pydantic Schemas
+<a id="pydantic-schemas"></a>
 
-Schemas live alongside the model and split into request/response shapes:
+### Pydantic Schema
+
+Schema 与模型放在一起，区分请求和响应结构：
 
 ```python
 # modules/user/schemas.py
@@ -103,9 +117,11 @@ class UserRead(BaseModel):
     # No hashed_password — schemas exclude sensitive fields
 ```
 
-### FastCRUD Operations
+<a id="fastcrud-operations"></a>
 
-Each module exposes a thin FastCRUD wrapper:
+### FastCRUD 操作
+
+每个模块提供轻量的 FastCRUD 封装：
 
 ```python
 # modules/user/crud.py
@@ -115,7 +131,7 @@ from .models import User
 crud_users: FastCRUD = FastCRUD(User)
 ```
 
-Then in the service:
+随后在服务中使用：
 
 ```python
 # modules/user/service.py
@@ -140,9 +156,11 @@ await crud_users.delete(db=db, id=user_id)
 await crud_users.db_delete(db=db, id=user_id)
 ```
 
-### Database Migrations
+<a id="database-migrations"></a>
 
-Run from `backend/`:
+### 数据库迁移
+
+在 `backend/` 中执行：
 
 ```bash
 # Generate a migration from model changes
@@ -155,11 +173,15 @@ uv run --no-sync alembic upgrade head
 uv run --no-sync alembic downgrade -1
 ```
 
-## Database Setup
+<a id="database-setup"></a>
 
-The boilerplate uses async PostgreSQL via `asyncpg`.
+## 数据库设置
 
-### Environment Configuration
+模板通过 `asyncpg` 异步访问 PostgreSQL。
+
+<a id="environment-configuration"></a>
+
+### 环境配置
 
 ```env
 # backend/.env
@@ -174,11 +196,13 @@ POSTGRES_MAX_OVERFLOW=0
 CREATE_TABLES_ON_STARTUP=true   # the default in local and development
 ```
 
-The `DATABASE_URL` property on `DatabaseSettings` is computed from these. If you set `DATABASE_URL` directly in the environment it overrides everything else.
+`DatabaseSettings` 的 `DATABASE_URL` 属性由这些值计算得到。直接设置环境变量 `DATABASE_URL` 会覆盖其他配置。
 
-### Connection Management
+<a id="connection-management"></a>
 
-The session dependency lives in `infrastructure/database/session.py`:
+### 连接管理
+
+会话依赖位于 `infrastructure/database/session.py`：
 
 ```python
 from collections.abc import AsyncGenerator
@@ -190,9 +214,9 @@ async def async_session() -> AsyncGenerator[AsyncSession, None]:
         yield db
 ```
 
-The engine is created on first use by `get_engine()`, not at import time. `local_session()` opens a session on it, and `close_database()` (in `infrastructure/database/initialize.py`) disposes it. The app lifespan calls `close_database()` on shutdown. Standalone scripts that open sessions should call it before exiting.
+引擎由 `get_engine()` 首次使用时创建，而非导入时创建。`local_session()` 在该引擎上打开会话；`infrastructure/database/initialize.py` 中的 `close_database()` 释放引擎。应用生命周期在关闭时调用它，独立脚本使用会话后也应在退出前调用。
 
-Use it in routes via FastAPI's `Depends`:
+路由通过 FastAPI 的 `Depends` 使用：
 
 ```python
 from typing import Annotated
@@ -209,37 +233,57 @@ async def list_users(
     ...
 ```
 
-## Included Models
+<a id="included-models"></a>
 
-The boilerplate ships with these models (one per feature module):
+## 随附模型
 
-### `User` — `modules/user/models.py`
-- Username, email, hashed password, full name, profile image
-- OAuth fields: `oauth_provider`, `google_id`, `github_id`
-- Foreign key to `tier`
-- Mixins: `TimestampMixin`, `SoftDeleteMixin`
-- Table name: **`user`** (singular)
+模板包含以下模型，分别属于对应功能模块：
 
-### `Tier` — `modules/tier/models.py`
-- Just `name` and `description` — no pricing or business logic
-- One-to-many relationship with users
-- Mixins: `TimestampMixin`, `SoftDeleteMixin`
-- Table name: **`tiers`**
+<a id="user-modulesusermodelspy"></a>
+<a id="user--modulesusermodelspy"></a>
 
-### `RateLimit` — `modules/rate_limit/models.py`
-- Per-tier rate limits keyed by API path
-- Fields: `tier_id`, `name`, `path`, `limit`, `period`
-- One live rule per tier and path (`uq_rate_limits_tier_path`)
-- Mixins: `TimestampMixin`, `SoftDeleteMixin`
-- Table name: **`rate_limits`**
+### `User`：`modules/user/models.py`
 
-### `APIKey`, `KeyUsage` — `modules/api_keys/models.py`
-- API key issuance, each key scoped by a list of registry permission names, with usage tracking
-- Table names: `api_keys`, `key_usage`
+- 用户名、邮箱、密码哈希、姓名和头像。
+- OAuth 字段：`oauth_provider`、`google_id`、`github_id`。
+- 指向 `tier` 的外键。
+- 使用 `TimestampMixin`、`SoftDeleteMixin`。
+- 表名为单数 **`user`**。
 
-## Directory Structure
+<a id="tier-modulestiermodelspy"></a>
+<a id="tier--modulestiermodelspy"></a>
 
-Each feature owns its data stack:
+### `Tier`：`modules/tier/models.py`
+
+- 仅包含 `name` 和 `description`，不包含定价或业务逻辑。
+- 与用户是一对多关系。
+- 使用 `TimestampMixin`、`SoftDeleteMixin`。
+- 表名：**`tiers`**。
+
+<a id="ratelimit-modulesrate_limitmodelspy"></a>
+<a id="ratelimit--modulesrate_limitmodelspy"></a>
+
+### `RateLimit`：`modules/rate_limit/models.py`
+
+- 按 API 路径配置各等级的限流。
+- 字段：`tier_id`、`name`、`path`、`limit`、`period`。
+- 每个等级和路径只允许一条未删除规则，由 `uq_rate_limits_tier_path` 保证。
+- 使用 `TimestampMixin`、`SoftDeleteMixin`。
+- 表名：**`rate_limits`**。
+
+<a id="apikey-keyusage-modulesapi_keysmodelspy"></a>
+<a id="apikey-keyusage--modulesapi_keysmodelspy"></a>
+
+### `APIKey`、`KeyUsage`：`modules/api_keys/models.py`
+
+- 签发 API 密钥，每个密钥通过注册权限名列表限定范围，并跟踪使用情况。
+- 表名：`api_keys`、`key_usage`。
+
+<a id="directory-structure"></a>
+
+## 目录结构
+
+每个功能拥有自己的数据处理栈：
 
 ```text
 backend/src/
@@ -259,11 +303,15 @@ backend/src/
     └── api_keys/
 ```
 
-The shared `Base` and mixins are in `infrastructure/database/`. Everything feature-specific is colocated under the module.
+共享 `Base` 和 mixin 位于 `infrastructure/database/`，功能专属内容都集中在模块目录。
 
-## Common Patterns
+<a id="common-patterns"></a>
 
-### Create with Validation
+## 常见模式
+
+<a id="create-with-validation"></a>
+
+### 校验后创建
 
 ```python
 @router.post("/", response_model=UserRead, status_code=201)
@@ -276,7 +324,9 @@ async def create_user(
     return await user_service.create(user, db)
 ```
 
-### Query with Filters
+<a id="query-with-filters"></a>
+
+### 带条件查询
 
 ```python
 # Active users only (excludes soft-deleted)
@@ -295,11 +345,13 @@ result = await crud_users.get_multi(
 )
 ```
 
-FastCRUD supports `__` operators on field names (`__contains`, `__icontains`, `__gt`, `__lt`, `__in`, etc.).
+FastCRUD 支持字段名后的 `__` 操作符，如 `__contains`、`__icontains`、`__gt`、`__lt`、`__in`。
 
-### Soft Delete Pattern
+<a id="soft-delete-pattern"></a>
 
-The `SoftDeleteMixin` adds `is_deleted` and `deleted_at`. FastCRUD's `.delete()` flips the flag without removing the row:
+### 软删除
+
+`SoftDeleteMixin` 添加 `is_deleted` 和 `deleted_at`。FastCRUD 的 `.delete()` 修改标记，而非移除记录：
 
 ```python
 # Soft delete (default for models with the mixin)
@@ -312,9 +364,11 @@ await crud_users.db_delete(db=db, id=user_id)
 await crud_users.get_multi(db=db, is_deleted=False)
 ```
 
-## What's Next
+<a id="whats-next"></a>
 
-1. **[Models](models.md)** - Define your tables and relationships
-2. **[Schemas](schemas.md)** - Add Pydantic validation and serialization
-3. **[CRUD Operations](crud.md)** - Use FastCRUD to read and write data
-4. **[Migrations](migrations.md)** - Track and deploy schema changes
+## 后续步骤
+
+1. **[模型](models.md)**：定义表和关联关系。
+2. **[Schema](schemas.md)**：添加 Pydantic 校验和序列化。
+3. **[CRUD 操作](crud.md)**：通过 FastCRUD 读写数据。
+4. **[迁移](migrations.md)**：跟踪和部署结构变更。

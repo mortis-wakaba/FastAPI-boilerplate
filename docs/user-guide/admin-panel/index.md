@@ -1,16 +1,19 @@
-# Admin Panel
+<a id="admin-panel"></a>
 
-The boilerplate ships a built-in admin panel powered by [SQLAdmin](https://github.com/smithyhq/sqladmin). It gives you a web interface for browsing and editing the database without writing custom CRUD endpoints.
+# 管理后台
 
-The panel is the `admin` feature. A project without it has no `/admin` mount, no `wiring/admin.py` and no admin views, and each feature's views leave with the feature: see [Composable Features](../composable-features.md).
+模板内置基于 [SQLAdmin](https://github.com/smithyhq/sqladmin) 的后台，可通过 Web 浏览和编辑数据库，无需另写 CRUD 接口。
 
-!!! tip "Building a full SaaS?"
-    The admin panel is part of the free foundation. **[FastroAI](https://fastro.ai)** bundles it with Stripe payments, entitlements, transactional email, a frontend, and AI agents - all wired together and production-ready. [Ship your SaaS faster →](https://fastro.ai)
+后台属于 `admin` 功能。移除后没有 `/admin`、`wiring/admin.py` 和管理视图；各功能的视图也随功能移除，见[可组合功能](../composable-features.md)。
 
-## Accessing the Admin Panel
+!!! tip "构建完整 SaaS？"
+    后台属于免费基础功能。**[FastroAI](https://fastro.ai)** 将其与 Stripe 支付、权益管理、事务邮件、前端及 AI Agent 整合。原文将其定位为可直接用于生产的完整组合。[更快交付 SaaS →](https://fastro.ai)
 
-The admin panel is mounted at `/admin`. It is off until you ask for it, and is not mounted at all
-without the credentials it signs you in with:
+<a id="accessing-the-admin-panel"></a>
+
+## 访问后台
+
+默认挂载 `/admin`，需要显式开启，未配置登录凭据时不会挂载：
 
 ```env
 ADMIN_ENABLED=true   # unset or false leaves /admin unmounted
@@ -18,7 +21,7 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=Change-Me-Now-1!
 ```
 
-Authentication is **separate from your app's session auth**. Admin login uses simple username/password credentials read from environment variables:
+后台认证**独立于应用会话认证**，从环境变量读取用户名和密码：
 
 ```env
 ADMIN_USERNAME=admin
@@ -26,90 +29,89 @@ ADMIN_PASSWORD=Change-Me-Now-1!
 SECRET_KEY=<used for admin session encryption>
 ```
 
-Visit <http://localhost:8000/admin>, enter those credentials, and you're in.
+访问 <http://localhost:8000/admin> 并输入凭据。
 
-!!! warning "Login is disabled until credentials are configured"
-    `ADMIN_USERNAME` and `ADMIN_PASSWORD` default to empty. With either unset, **every admin login attempt fails** — an empty form submission does not authenticate. Set both before the panel is usable.
+!!! warning "配置凭据前无法登录"
+    `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 默认空。任一未设置，所有登录尝试均失败，空表单也不能认证。
 
-## What You'll Learn
+<a id="what-youll-learn"></a>
 
-- **[Configuration](configuration.md)** - Environment variables and deployment settings
-- **[Adding Models](adding-models.md)** - Register your own models with the admin interface
-- **[User Management](user-management.md)** - Admin authentication and security
+## 内容概览
 
-## What's Included
+- **[配置](configuration.md)**：环境变量和部署。
+- **[添加模型](adding-models.md)**：注册自定义模型。
+- **[用户管理](user-management.md)**：后台认证和安全。
 
-Each feature ships its own views, and `src/wiring/admin.py` lists the ones this
-project registers. Out of the box that is five:
+<a id="whats-included"></a>
 
-| View | Source | Notes |
-|------|--------|-------|
-| **Users** | `modules/user/admin.py` | Create / edit / delete users; password hashing applied automatically; soft-delete-aware; shows the tier column only when the tiers feature contributed one |
-| **Tiers** | `modules/tier/admin.py` | Manage subscription tiers; lists and counts only live ones; uses `TierService.permanent_delete` to prevent orphaning users / rate limits |
-| **Roles** | `modules/role/admin.py` | Create / rename / delete roles; the listing shows the permissions each one carries |
-| **Role permissions** | `modules/role/admin.py` | One grant per row; the permission field is a picker over the registry |
-| **User roles** | `modules/role/admin.py` | Who holds which role; the listing, its count and the account picker all leave out accounts a soft delete has taken out |
+## 包含的视图
 
-All five are categorized under "Users & Access"; Users and Tiers provide search, sort, filter, and
-CSV export. The three role views come with the rbac feature, and each view with the feature that
-owns its table, so a project without one of them registers fewer.
+各功能自带视图，由 `src/wiring/admin.py` 列出，默认五个：
 
-If you want admin views for `RateLimit`, `APIKey`, etc., follow the [Adding Models](adding-models.md) guide.
+| 视图 | 来源 | 说明 |
+|------|------|------|
+| **Users** | `modules/user/admin.py` | 增删改用户，自动密码哈希，感知软删除；仅 tiers 功能提供等级列时展示 |
+| **Tiers** | `modules/tier/admin.py` | 管理等级，仅列举和统计未删除记录；调用 `TierService.permanent_delete` 避免遗留用户或限流引用 |
+| **Roles** | `modules/role/admin.py` | 创建、改名、删除角色，并列出权限 |
+| **Role permissions** | `modules/role/admin.py` | 每行一个权限，字段通过注册表选择 |
+| **User roles** | `modules/role/admin.py` | 账户角色；列表、计数和账户选择器均排除软删除账户 |
 
-## Common Operations
+均位于 **Users & Access** 分类。Users 和 Tiers 提供搜索、排序、过滤及 CSV 导出。三个角色视图随 rbac 提供，各视图随表所属功能提供，因此移除功能后数量减少。
 
-### Creating a User
+需要 `RateLimit`、`APIKey` 等视图时，见[添加模型](adding-models.md)。
 
-Navigate to **Users → Create**. Fill the form. The `Password` field accepts plaintext — `UserAdmin.on_model_change` runs `get_password_hash()` before saving so the database only ever sees the hash.
+<a id="common-operations"></a>
 
-### Editing a User
+## 常用操作
 
-Click any user row → **Edit**. You can change the name, username, email, the tier, the OAuth identifiers and `is_superuser`. The edit form has no password field (`form_edit_rules` comes from `UserAdminUpdate`), so a reset goes through the API's change-password route or a new hash written directly.
+<a id="creating-a-user"></a>
 
-The tier picker lists only tiers a soft delete hasn't taken out, and a save that still names a
-deleted one is refused with "That tier has been deleted. Pick another one."
+### 创建用户
 
-### Giving an Account a Role
+进入 **Users → Create**。`Password` 接受明文，`UserAdmin.on_model_change` 保存前调用 `get_password_hash()`，数据库只接收哈希。
 
-A role is built in two places: **Roles → Create** names it, and **Role permissions → Create** adds
-one permission to it per row. The permission field offers only names the registry knows, and a write
-that goes around the form is refused by the model as well, so a grant the project could never check
-cannot be stored. A grant and a holding are a pair of rows with nothing else to edit, so both views
-create and delete rather than edit: to change a role's permissions, delete the grant and add
-another.
+<a id="editing-a-user"></a>
 
-**User roles → Create** hands a role to an account. The listing, the total it paginates by and the
-account picker all leave out accounts a soft delete has taken out — they are nobody to hand a role
-to — while the API's `GET /api/v1/users/{user_id}/roles` still reads what such an account held.
+### 编辑用户
 
-!!! warning "The panel is above the delegation checks"
-    The API refuses to grant a permission, or to touch an account, stronger than the caller
-    ([Permissions](../authentication/permissions.md#managing-roles)). The panel has no such caller:
-    it signs in with `ADMIN_USERNAME` / `ADMIN_PASSWORD`, and those credentials already let it set
-    `is_superuser` on any user, so there is no weaker operator to hold back. Whoever can reach
-    `/admin` can grant anything the registry knows.
+点击用户行再选 **Edit**，可改姓名、用户名、邮箱、等级、OAuth 标识和 `is_superuser`。编辑表单由 `UserAdminUpdate` 的 `form_edit_rules` 生成，不含密码，重置需使用 API 改密路由或直接写新哈希。
 
-### Deleting a Tier
+等级选择器只显示未软删除等级。保存时仍引用已删除等级会被拒绝，提示 `That tier has been deleted. Pick another one.`。
 
-The Tier delete button calls `TierService.permanent_delete`, which **fails** if any live user or
-rate limit still references the tier. This prevents dangling foreign keys. Reassign or remove the
-dependents first. Users a soft delete already removed are released from the tier as part of the
-permanent delete; a *soft* delete of a tier (`DELETE /api/v1/tiers/{name}`) leaves them on it, so a
-restore finds them where they were.
+<a id="giving-an-account-a-role"></a>
 
-## How Authentication Works
+### 为账户分配角色
 
-The admin panel uses session-based auth via `SessionMiddleware` (Starlette), separate from the API's session system. When you submit the login form:
+先 **Roles → Create** 创建名称，再 **Role permissions → Create** 逐行添加权限。选择器只包含注册名称，绕过表单的写入也被模型校验。权限授予和角色分配都是关系行，没有其他内容可编辑，所以只提供创建和删除；更换权限时先删旧行再加新行。
 
-1. `AdminAuth.login` validates the credentials against `ADMIN_USERNAME` / `ADMIN_PASSWORD`
-2. On success, sets `request.session["admin_authenticated"] = True`
-3. Subsequent requests check that flag
+**User roles → Create** 分配角色。列表、分页总数、账户选择器排除软删除账户，但 API `GET /api/v1/users/{user_id}/roles` 仍可读取旧分配。
 
-This is intentionally simpler than the main app's session system — the admin panel is for a small number of trusted operators, not end users. The session cookie is signed with `SECRET_KEY`, not encrypted: its contents are readable by whoever holds it, and the signature is what stops it being forged. Its `Path` is the panel's own mount — `ADMIN_BASE_URL`, with any `root_path` the request arrived through — so the API never receives it, and an API route can never be reached with an operator's panel session.
+!!! warning "后台不受普通委派检查约束"
+    API 不允许授予比自己更强的权限或操作更强账户，见[权限](../authentication/permissions.md#managing-roles)。后台通过独立 `ADMIN_*` 登录，已能设置任意人的 `is_superuser`，没有较弱操作员可约束。能登录后台的人可授予任意注册权限。
 
-## How It's Wired
+<a id="deleting-a-tier"></a>
 
-The admin app is created in `src/interfaces/admin/initialize.py` and mounted in `src/interfaces/main.py` at startup:
+### 删除等级
+
+调用 `TierService.permanent_delete`，仍有活跃用户或限流引用时**失败**，需先重新分配或移除依赖。永久删除会释放软删除用户的等级引用；`DELETE /api/v1/tiers/{name}` 软删除则保留，恢复时仍可找到原关系。
+
+<a id="how-authentication-works"></a>
+
+## 认证工作方式
+
+后台通过 Starlette `SessionMiddleware` 使用独立会话：
+
+1. `AdminAuth.login` 校验 `ADMIN_USERNAME` / `ADMIN_PASSWORD`。
+2. 成功设置 `request.session["admin_authenticated"] = True`。
+3. 后续请求检查标记。
+
+后台面向少量可信操作员，因此比主应用简单。Cookie 由 `SECRET_KEY` **签名而非加密**，持有者可读内容，签名防篡改。路径限定为 `ADMIN_BASE_URL` 加请求 `root_path`，API 不接收它，后台会话也不能访问 API。
+
+<a id="how-its-wired"></a>
+
+## 组装方式
+
+后台在 `src/interfaces/admin/initialize.py` 创建，启动时挂载：
 
 ```python
 # interfaces/admin/initialize.py
@@ -138,35 +140,38 @@ def create_admin_interface(app: FastAPI) -> Admin | None:
     return admin
 ```
 
-The admin feature contributes `install(app)` to the wiring's installers, and the app
-factory calls it, so nothing in `main.py` mentions the panel. If `ADMIN_ENABLED=false`,
-nothing is mounted. The panel brings its own session middleware, scoped to its own
-routes, so an API request never decodes an admin cookie.
+admin 功能向 wiring 的安装器列表贡献 `install(app)`，由应用工厂调用，`main.py` 无需直接引用后台。`ADMIN_ENABLED=false` 不挂载。后台会话中间件只作用于自己的路由，API 不解码后台 Cookie。
 
-## Disabling in Production
+<a id="disabling-in-production"></a>
 
-If you don't want the admin panel reachable in production, set:
+## 在生产禁用
+
+不希望生产开放后台时：
 
 ```env
 ADMIN_ENABLED=false
 ```
 
-Or keep it enabled but restrict network access at the load balancer / proxy level (e.g. only allow `/admin` from your VPN's CIDR).
+也可启用，但在负载均衡或代理仅允许 VPN CIDR 访问 `/admin`。
 
-## Key Files
+<a id="key-files"></a>
 
-| Component | Location |
-|-----------|----------|
-| Admin app factory | `backend/src/interfaces/admin/initialize.py` |
-| Authentication backend | `backend/src/interfaces/admin/auth.py` |
-| Dataclass-model mixin | `backend/src/interfaces/admin/mixins.py` |
-| User view | `backend/src/modules/user/admin.py` |
-| Tier view | `backend/src/modules/tier/admin.py` |
-| Role, grant and holder views | `backend/src/modules/role/admin.py` |
-| View registry | `backend/src/wiring/admin.py` |
+## 关键文件
 
-## Next Steps
+| 组件 | 位置 |
+|------|------|
+| 后台工厂 | `backend/src/interfaces/admin/initialize.py` |
+| 认证后端 | `backend/src/interfaces/admin/auth.py` |
+| dataclass 模型 mixin | `backend/src/interfaces/admin/mixins.py` |
+| 用户视图 | `backend/src/modules/user/admin.py` |
+| 等级视图 | `backend/src/modules/tier/admin.py` |
+| 角色、权限、分配视图 | `backend/src/modules/role/admin.py` |
+| 视图注册表 | `backend/src/wiring/admin.py` |
 
-1. **[Configuration](configuration.md)** — Environment variables and deployment options
-2. **[Adding Models](adding-models.md)** — Walkthrough for registering your own model views
-3. **[User Management](user-management.md)** — Hardening the admin login for production
+<a id="next-steps"></a>
+
+## 后续步骤
+
+1. **[配置](configuration.md)**：环境变量和部署选项。
+2. **[添加模型](adding-models.md)**：注册自定义视图。
+3. **[用户管理](user-management.md)**：强化生产登录。

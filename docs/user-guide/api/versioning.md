@@ -1,8 +1,12 @@
-# API Versioning
+<a id="api-versioning"></a>
 
-The boilerplate ships a `v1` namespace under `/api/v1/`. This page documents the actual wiring and how to add `/api/v2/` when you need to make breaking changes.
+# API 版本管理
 
-## How It's Wired Today
+模板在 `/api/v1/` 下提供 `v1` 命名空间。本页介绍现有组装方式，以及发生破坏性变更时如何添加 `/api/v2/`。
+
+<a id="how-its-wired-today"></a>
+
+## 当前组装方式
 
 ```text
 backend/src/interfaces/api/
@@ -11,7 +15,7 @@ backend/src/interfaces/api/
     └── __init__.py        # mounts /v1 + each module's router
 ```
 
-`interfaces/api/__init__.py`:
+`interfaces/api/__init__.py`：
 
 ```python
 from fastapi import APIRouter
@@ -22,7 +26,7 @@ router = APIRouter(prefix="/api")
 router.include_router(v1_router)
 ```
 
-`interfaces/api/v1/__init__.py`:
+`interfaces/api/v1/__init__.py`：
 
 ```python
 from fastapi import APIRouter
@@ -41,9 +45,9 @@ router.include_router(auth_router, prefix="/auth")
 router.include_router(api_keys_router, prefix="/api-keys")
 ```
 
-The aggregator is the **only** place that knows about every module's router. Each module exposes a single `router` from its `routes.py`, and v1 mounts them all under their respective prefixes.
+汇总器是唯一集中感知所有模块路由的位置。各模块从 `routes.py` 导出一个 `router`，v1 将它们挂载到各自前缀。
 
-`interfaces/main.py` then mounts the API tree:
+`interfaces/main.py` 随后挂载 API 树：
 
 ```python
 from ..interfaces.api import router
@@ -51,23 +55,29 @@ from ..interfaces.api import router
 app.include_router(router)
 ```
 
-So `users_router → /users → /v1/users → /api/v1/users → /api/v1/users/me`, etc.
+路径依次为 `users_router → /users → /v1/users → /api/v1/users → /api/v1/users/me` 等。
 
-## Endpoints Today
+<a id="endpoints-today"></a>
 
-| URL prefix | Source |
-|------------|--------|
+## 当前接口
+
+| URL 前缀 | 来源 |
+|----------|------|
 | `/api/v1/users/*` | `modules/user/routes.py` |
 | `/api/v1/tiers/*` | `modules/tier/routes.py` |
 | `/api/v1/rate-limits/*` | `modules/rate_limit/routes.py` |
 | `/api/v1/auth/*` | `infrastructure/auth/routes.py` |
 | `/api/v1/api-keys/*` | `modules/api_keys/routes.py` |
 
-## Adding `v2`
+<a id="adding-v2"></a>
 
-When you need to make breaking changes — new response shapes, removed fields, different auth requirements — add a new version sibling instead of mutating v1.
+## 添加 v2
 
-### Step 1: Create the v2 Aggregator
+新响应结构、移除字段、认证要求变化等破坏性变更，应新增同级版本，而非修改 v1。
+
+<a id="step-1-create-the-v2-aggregator"></a>
+
+### 第一步：创建 v2 汇总器
 
 ```bash
 mkdir backend/src/interfaces/api/v2
@@ -89,11 +99,13 @@ router.include_router(users_router, prefix="/users")
 # router.include_router(tiers_router, prefix="/tiers")
 ```
 
-### Step 2: Create v2 Routes Per Module
+<a id="step-2-create-v2-routes-per-module"></a>
 
-Two patterns work, pick the one that fits the change:
+### 第二步：为模块创建 v2 路由
 
-**Pattern A: a separate `routes_v2.py`** — when v2's routes are different enough that mixing them in `routes.py` would be confusing.
+按变更选择以下模式：
+
+**模式 A：独立 `routes_v2.py`**。v2 路由差异较大，混入 `routes.py` 会难以理解时使用。
 
 ```python
 # backend/src/modules/user/routes_v2.py
@@ -128,7 +140,7 @@ async def list_users(
     return paginated_response(crud_data=result, page=page, items_per_page=items_per_page)
 ```
 
-**Pattern B: alias the existing router** — when v2's behavior is identical and only the URL prefix needs to differ:
+**模式 B：复用现有路由**。行为相同、仅 URL 前缀不同时使用：
 
 ```python
 # backend/src/interfaces/api/v2/__init__.py
@@ -137,7 +149,9 @@ from ....modules.tier.routes import router as tiers_router
 router.include_router(tiers_router, prefix="/tiers")
 ```
 
-### Step 3: Mount v2 Alongside v1
+<a id="step-3-mount-v2-alongside-v1"></a>
+
+### 第三步：同时挂载 v1 与 v2
 
 ```python
 # backend/src/interfaces/api/__init__.py
@@ -151,11 +165,13 @@ router.include_router(v1_router)
 router.include_router(v2_router)
 ```
 
-Both `/api/v1/users/` and `/api/v2/users/` are now live.
+现在 `/api/v1/users/` 和 `/api/v2/users/` 同时可用。
 
-## Schema Versioning
+<a id="schema-versioning"></a>
 
-Keep v1 schemas exactly as they are; add v2 schemas in a new file. Never edit a v1 schema in a way that changes the wire format — that's the whole point of having a v2.
+## Schema 版本管理
+
+保留 v1 Schema 原样，在新文件中添加 v2 Schema。不要改变 v1 的传输格式，这是引入 v2 的目的。
 
 ```python
 # backend/src/modules/user/schemas.py — UNCHANGED
@@ -184,11 +200,13 @@ class UserReadV2(BaseModel):
     created_at: datetime                     # newly exposed
 ```
 
-Service methods that produce the v2 shape live next to the v1 ones — `UserService.get_paginated` for v1, `UserService.get_paginated_v2` for v2 — so the service still owns the data assembly logic.
+产生 v2 数据结构的服务方法与 v1 放在一起，例如 v1 使用 `UserService.get_paginated`，v2 使用 `UserService.get_paginated_v2`，使数据组装仍归服务负责。
 
-## Sharing Code Across Versions
+<a id="sharing-code-across-versions"></a>
 
-The CRUD layer, services, and infrastructure are **shared**. Only the routes and schemas duplicate. That's the point — it's cheap to add a version because most of the codebase doesn't move.
+## 跨版本共享代码
+
+CRUD、服务和基础设施**共享**，仅路由与 Schema 按版本区分。多数代码无需变化，因此新增版本成本较低。
 
 ```text
 modules/user/
@@ -201,11 +219,15 @@ modules/user/
 └── routes_v2.py         ← v2 routes
 ```
 
-## Deprecating a Version
+<a id="deprecating-a-version"></a>
 
-When v2 is ready and v1 should sunset:
+## 弃用旧版本
 
-### 1. Add a deprecation header to v1 endpoints
+v2 就绪、v1 准备下线时：
+
+<a id="1-add-a-deprecation-header-to-v1-endpoints"></a>
+
+### 1. 为 v1 添加弃用响应头
 
 ```python
 # Inside a v1 route handler
@@ -220,26 +242,32 @@ async def list_users(
     return await ...
 ```
 
-The `Deprecation`, `Sunset`, and `Link` headers come from the IETF [API Deprecation](https://datatracker.ietf.org/doc/html/rfc8594) drafts — clients with HTTP-aware tooling pick them up automatically.
+原文将 `Deprecation`、`Sunset`、`Link` 头归于 IETF [API 弃用](https://datatracker.ietf.org/doc/html/rfc8594)相关草案，支持相应 HTTP 语义的客户端工具可识别它们。
 
-The `deprecated=True` flag also marks the endpoint in `/docs`.
+`deprecated=True` 还会在 `/docs` 中标记接口。
 
-### 2. Track v1 usage
+<a id="2-track-v1-usage"></a>
 
-If you have logging middleware or observability, slice request counts by `request.url.path.startswith("/api/v1/")` to know when v1 traffic is low enough to retire.
+### 2. 跟踪 v1 使用量
 
-### 3. Remove v1 after sunset
+通过日志中间件或可观测性工具，按 `request.url.path.startswith("/api/v1/")` 统计请求，判断流量是否已足够低。
 
-When the sunset date passes and traffic is gone:
+<a id="3-remove-v1-after-sunset"></a>
 
-1. Delete `interfaces/api/v1/`
-2. Delete the v1-only `schemas.py` blocks (or rename `schemas_v2.py` → `schemas.py`)
-3. Delete v1-only service methods
-4. Update `interfaces/api/__init__.py` to mount only v2
+### 3. 下线后移除 v1
 
-## Per-Version OpenAPI Documentation
+截止日期已过且没有流量后：
 
-By default, `/docs` shows every route. To split docs per version, mount each version as a sub-app with its own `FastAPI()` instance:
+1. 删除 `interfaces/api/v1/`。
+2. 删除仅用于 v1 的 `schemas.py` 内容，或将 `schemas_v2.py` 重命名为 `schemas.py`。
+3. 删除仅用于 v1 的服务方法。
+4. 更新 `interfaces/api/__init__.py`，只挂载 v2。
+
+<a id="per-version-openapi-documentation"></a>
+
+## 按版本提供 OpenAPI 文档
+
+默认 `/docs` 展示全部路由。需要独立文档时，将每个版本作为拥有自身 `FastAPI()` 实例的子应用挂载：
 
 ```python
 # backend/src/interfaces/main.py — sketch
@@ -259,11 +287,13 @@ v2.include_router(v2_router)
 main.mount("/api/v2", v2)
 ```
 
-You'll get `/api/v1/docs` and `/api/v2/docs` independently. Note the boilerplate ships a single mounted app today — adopt this only when you genuinely need separate docs.
+这样得到独立的 `/api/v1/docs` 和 `/api/v2/docs`。模板当前是单应用，确有需要时再采用此方式。
 
-## Testing Multiple Versions
+<a id="testing-multiple-versions"></a>
 
-Once v2 exists, run the test suite against both:
+## 测试多个版本
+
+v2 存在后，对两个版本都运行测试：
 
 ```python
 import pytest
@@ -287,31 +317,41 @@ async def test_v2_users_paginated(client: AsyncClient):
     assert "page" in body
 ```
 
-## Best Practices
+<a id="best-practices"></a>
 
-### What counts as a breaking change?
+## 最佳实践
 
-- Removing a field from a response
-- Renaming a field
-- Changing a field's type (e.g. `tier_id: int | None` → `tier_name: str`)
-- Tightening validation in a way that previously-valid input now fails
-- Adding a required request field
-- Changing default behavior (e.g. unpaginated → paginated)
-- Changing auth requirements
+<a id="what-counts-as-a-breaking-change"></a>
 
-If you're not making a breaking change, just add the new field/feature to v1.
+### 什么是破坏性变更
 
-### Keep the URL pattern consistent
+- 删除响应字段。
+- 重命名字段。
+- 改变类型，例如 `tier_id: int | None` 改为 `tier_name: str`。
+- 收紧校验，使以前合法的输入失败。
+- 新增必填请求字段。
+- 改变默认行为，例如从不分页变为分页。
+- 改变认证要求。
 
-Always `/api/v{number}/resource`. Don't get clever with version-in-headers schemes — URL versioning is unambiguous to humans and to caches.
+非破坏性变更可直接在 v1 添加字段或功能。
 
-### Don't fork the service layer prematurely
+<a id="keep-the-url-pattern-consistent"></a>
 
-If v2 only changes the response shape, derive the v2 dict from the same service method via a small adapter; only fork the service when business logic actually differs.
+### 保持 URL 模式一致
 
-### Document changes in a changelog
+始终使用 `/api/v{number}/resource`。原文推荐 URL 版本而非请求头版本，方便人和缓存明确识别。
 
-Tag the v2 release with the list of breaking changes:
+<a id="dont-fork-the-service-layer-prematurely"></a>
+
+### 不要过早拆分服务层
+
+v2 只改变响应结构时，通过小型适配器从同一服务结果派生字典。业务逻辑实际不同后再拆分服务。
+
+<a id="document-changes-in-a-changelog"></a>
+
+### 在更新日志中记录变更
+
+发布 v2 时列出破坏性变更：
 
 ```markdown
 ## API v2
@@ -324,10 +364,12 @@ Breaking changes vs v1:
 - `UserCreate` now requires `accept_terms: bool`
 ```
 
-A short, blunt list helps consumers migrate.
+简短、直接的清单有助于调用方迁移。
 
-## What's Next
+<a id="whats-next"></a>
 
-- **[Database Migrations](../database/migrations.md)** — Schema changes that may motivate a new API version
-- **[Endpoints](endpoints.md)** — Patterns for routes
-- **[Schemas](../database/schemas.md)** — Versioned shapes
+## 后续步骤
+
+- **[数据库迁移](../database/migrations.md)**：可能触发新 API 版本的结构变化。
+- **[接口](endpoints.md)**：路由模式。
+- **[Schema](../database/schemas.md)**：按版本组织数据结构。

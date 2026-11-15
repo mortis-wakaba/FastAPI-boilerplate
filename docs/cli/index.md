@@ -1,15 +1,22 @@
-# bp — the FastAPI-boilerplate CLI
+<a id="bp-the-fastapi-boilerplate-cli"></a>
+<a id="bp--the-fastapi-boilerplate-cli"></a>
 
-`bp` is the developer/operator tool that ships alongside the boilerplate. It generates deployment artifacts, helps prepare the runtime environment, and serves as the host for plugin commands and feature generators.
+# bp：FastAPI-boilerplate CLI
 
-It is **not** part of the deployable backend. The backend image stays lean — `bp` lives in its own workspace package (`cli/`) and is only present in development environments and on machines where you've installed it as a tool.
+`bp` 是随模板提供的开发与运维工具，用于生成部署文件、准备运行环境，以及承载插件命令和功能生成器。
 
-## What's in this section
+它**不属于可部署后端**，独立放在 workspace 的 `cli/` 包，仅安装在开发环境或明确安装了该工具的机器上，使后端镜像保持精简。
 
-- **[Commands](commands.md)** — complete reference for the in-tree `deploy` and `env` sub-apps
-- **[Plugins](plugins.md)** — extension points (`bp.commands` and `bp.features`) and authoring guide
+<a id="whats-in-this-section"></a>
 
-## Repository Layout
+## 本章内容
+
+- **[命令](commands.md)**：内置 deploy 和 env 子应用的完整参考。
+- **[插件](plugins.md)**：bp.commands、bp.features 扩展点与编写指南。
+
+<a id="repository-layout"></a>
+
+## 仓库结构
 
 ```text
 fastapi-boilerplate/
@@ -26,11 +33,15 @@ fastapi-boilerplate/
 └── docs/
 ```
 
-The two-package split is deliberate: `cli/` depends on `backend/` (for things like `bp env validate`), but `backend/` never depends on `cli/`. Production images ship `backend/` only.
+两包有意分离：cli 依赖 backend，例如环境校验命令需要后端配置；backend 不反向依赖 cli，生产镜像只包含 backend。
 
-## Install
+<a id="install"></a>
 
-### In-repo (most common)
+## 安装
+
+<a id="in-repo-most-common"></a>
+
+### 仓库内使用（最常见）
 
 ```bash
 git clone https://github.com/benavlabs/fastapi-boilerplate
@@ -39,26 +50,32 @@ uv sync --all-packages --all-extras   # one venv with the backend, the cli and t
 uv run --no-sync bp --help         # works from anywhere in the repo
 ```
 
-The workspace shares a single `.venv/` at the repo root. You can run `uv run --no-sync bp` from any subdirectory — uv walks up to find the workspace root.
+workspace 共用根目录的 `.venv/`。uv 会向上查找根目录，因此任意子目录均可执行 `uv run --no-sync bp`。
 
-### Machine-wide (optional)
+<a id="machine-wide-optional"></a>
 
-If you want `bp` on `PATH` outside the repo:
+### 安装为全局工具（可选）
+
+希望仓库外 PATH 中也有 bp 时：
 
 ```bash
 uv tool install --editable ./cli
 bp --help
 ```
 
-`--editable` means edits to `cli/src/cli/` show up immediately without reinstall. Re-run `uv tool install --editable ./cli` only when `cli/pyproject.toml` changes (deps, entry points). To uninstall:
+`--editable` 使 cli/src/cli 的修改立即生效，无需重装。仅当 cli/pyproject.toml 的依赖或入口改变时重新安装。卸载：
 
 ```bash
 uv tool uninstall fastapi-boilerplate-cli
 ```
 
-## Quick Tour
+<a id="quick-tour"></a>
 
-### Generate a Compose File
+## 快速浏览
+
+<a id="generate-a-compose-file"></a>
+
+### 生成 Compose 文件
 
 ```bash
 uv run --no-sync bp deploy generate local                  # hot-reload dev stack
@@ -66,16 +83,20 @@ uv run --no-sync bp deploy generate prod --workers 8       # production stack
 uv run --no-sync bp deploy generate nginx                  # production behind nginx
 ```
 
-Each command writes `docker-compose.yml` (and `nginx/default.conf` for the nginx mode) to the repo root by default. Use `--output-dir` to target somewhere else.
+默认写入仓库根目录的 docker-compose.yml；nginx 模式还生成 nginx/default.conf。通过 `--output-dir` 指定其他位置。
 
-### Generate a Secret
+<a id="generate-a-secret"></a>
+
+### 生成密钥
 
 ```bash
 uv run --no-sync bp env gen-secret
 # → 64-char hex suitable for SECRET_KEY
 ```
 
-### Audit Production Settings
+<a id="audit-production-settings"></a>
+
+### 检查生产配置
 
 ```bash
 uv run --no-sync bp env validate
@@ -83,7 +104,9 @@ uv run --no-sync bp env validate
 # Exits 1 if any critical issues are found.
 ```
 
-## Command Tree
+<a id="command-tree"></a>
+
+## 命令树
 
 ```text
 bp
@@ -94,16 +117,20 @@ bp
     └── validate
 ```
 
-Plugin sub-apps mount as siblings of `deploy` and `env`. See [Plugins](plugins.md) for details.
+插件子应用与 deploy、env 同级挂载，见[插件](plugins.md)。
 
-## Design Principles
+<a id="design-principles"></a>
 
-- **No surprises in production.** `bp` never runs against production at runtime — it's a developer/operator tool. Production images don't even include the `cli` package.
-- **Two extension points, kept separate.** Command plugins (Typer sub-apps) and feature plugins (code generators with manifests) have different lifecycles and shouldn't share machinery.
-- **Templates as data.** Built-in features render Jinja templates. Plugin features do the same. The installer is the only thing that needs to know how to execute the plan.
-- **Idempotent and dry-runnable.** Every operation that mutates the user's repo prompts before overwriting and supports `--dry-run`.
+## 设计原则
 
-## Next Steps
+- **生产运行时不依赖 bp**：它属于开发与运维工具，生产镜像不包含 cli 包。
+- **扩展点分离**：命令插件是 Typer 子应用，功能插件是带清单的生成器，生命周期不同。
+- **模板作为数据**：内置和插件功能都渲染 Jinja 模板，安装器统一执行计划。
+- **幂等及预览**：修改仓库前支持覆盖确认和 `--dry-run`。
 
-- **[Commands](commands.md)** — full reference for the shipped commands
-- **[Plugins](plugins.md)** — write your own commands or features
+<a id="next-steps"></a>
+
+## 后续步骤
+
+- **[命令](commands.md)**：已有命令参考。
+- **[插件](plugins.md)**：编写命令或功能插件。

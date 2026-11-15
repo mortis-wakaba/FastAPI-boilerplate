@@ -1,51 +1,48 @@
-# Production Deployment
+<a id="production-deployment"></a>
 
-This page is the production hardening checklist for a FastAPI-boilerplate deployment. It covers the boilerplate's built-in production validators, env-var hygiene, the multi-stage Dockerfile that ships, and the operational decisions you'll make once.
+# 生产部署
 
-## The Production Validator
+本页是 FastAPI Boilerplate 的生产加固指南，介绍内置校验器、环境变量、多阶段 Dockerfile，以及部署时需要确定的运维策略。
 
-When `ENVIRONMENT=production`, `infrastructure/security/production_validator.py` runs at startup and refuses to boot the app on critical issues. Two tiers:
+<a id="the-production-validator"></a>
 
-### Critical (raises `ProductionSecurityError`, app exits)
+## 生产校验器
 
-The app **will not start** if any of these is true:
+`ENVIRONMENT=production` 时，`infrastructure/security/production_validator.py` 在启动运行。分两级：
 
-- **`SECRET_KEY` reads as something other than random.** Refused when it is empty or under 32
-  characters, or when one of these covers most of its length: a placeholder or hand-written word
-  (`password`, `secret`, `test`, `dev`, `default`, …), a short block written out again
-  (`prodprodprod…`), a walk across neighbouring keys (`qwertyuiop…`, `1qaz2wsx…`), or words anyone
-  would recognise (`MyCompanyApiSigningKeyForProd2026`, `thisismysupersecurekeyforthisapp`). Each of
-  those is measured as a share of the whole value, so a generated key that happens to spell a word
-  still passes. Two rules are absolute: a run of eight consecutive code points, and under 64 bits
-  of entropy. The tests sweep 100,000 keys of each shape a generator produces — the hex keys
-  `bp env gen-secret` prints (`secrets.token_hex(16/32)`) and `secrets.token_urlsafe(24/32)` keys
-  from whatever else you might use — from a fixed seed, and none of the 400,000 is refused. A
-  random key can still trip a rule: one hex key in 12.6 million runs through eight consecutive
-  digits, and a `token_urlsafe` key walks the keyboard at around one in ten million. Run inside a
-  project, `bp env gen-secret` checks each draw against those rules and draws again while they
-  would refuse it.
-- **The database password is `postgres`** (the well-known default). Attackers try this first.
-- **The database password is empty.** Database is unprotected.
-- **The admin panel is enabled without credentials** (`ADMIN_ENABLED=true` with `ADMIN_USERNAME` or `ADMIN_PASSWORD` unset).
-- **`CORS_ORIGINS` contains `*`.** Any website can call the API from a user's browser. The app drops `CORS_ALLOW_CREDENTIALS` while `*` is listed, so it answers `Access-Control-Allow-Origin: *` with no `Access-Control-Allow-Credentials`: a page on another origin cannot read a response to a call it made with the user's cookies. The call itself is still sent when it needs no preflight, cookie included wherever `SameSite` allows it, so a `*` origin neither protects the endpoint nor serves a logged-in frontend.
+<a id="critical-raises-productionsecurityerror-app-exits"></a>
 
-The password checked is the one actually used to connect: when `DATABASE_URL` is set it's read out of that URL, otherwise it's `POSTGRES_PASSWORD`. A `DATABASE_URL` with no password at all (IAM or certificate authentication) is a warning rather than an error, since it can't be verified from here.
+### 严重问题：抛 ProductionSecurityError，退出
 
-### Warnings (logged, app starts)
+以下情况**不会启动**：
 
-These don't block startup but you should fix them before the app sees real traffic:
+- **SECRET_KEY 不像随机值**：为空、少于 32 字符，或大部分由占位词 / 手写词（password、secret、test、dev、default 等）、重复短块（prodprod…）、相邻键盘序列（qwertyuiop、1qaz2wsx 等）、可识别短语（如 MyCompanyApiSigningKeyForProd2026）组成。按整值比例衡量，因此随机密钥偶然包含单词仍可通过。两条绝对规则是连续八个码点、熵低于 64 位。原文测试以固定种子分别扫描生成器四种格式各十万个值：`secrets.token_hex(16/32)` 和 `secrets.token_urlsafe(24/32)`，四十万个都未拒绝。但随机值仍可能碰规则，原文估计十六进制连续八位数字约每 1260 万个一次，urlsafe 键盘序列约每千万个一次。项目内 `bp env gen-secret` 每次生成后校验，不合格重新生成。
+- **数据库密码为 postgres**，公开默认值容易被尝试。
+- **数据库密码为空**。
+- **启用后台却缺少 ADMIN_USERNAME 或 ADMIN_PASSWORD**。
+- **CORS_ORIGINS 含 `*`**。任意网站可从用户浏览器调用 API。应用会关闭 CORS_ALLOW_CREDENTIALS，返回 `Access-Control-Allow-Origin: *` 而不允许凭据，因此其他来源不能读取带 Cookie 的响应。但不需预检的请求仍发送，在 SameSite 允许时仍带 Cookie，所以通配源既不能保护接口，也不能支持需登录前端。
 
-- **Redis without a password** (`CACHE_REDIS_PASSWORD` or `RATE_LIMITER_REDIS_PASSWORD` unset, or a `SESSION_REDIS_URL` without one)
-- **`DEBUG=true`** — exposes stack traces in error responses
-- **API docs (`/docs`, `/redoc`) reachable** — see "Documentation" below
-- **Session config too loose** (cookies not marked `Secure`, very long max-age, etc.)
-- **Weak admin credentials** (default username/password patterns)
+检查的是实际连接密码：设置 DATABASE_URL 时从 URL 读取，否则用 POSTGRES_PASSWORD。URL 完全没有密码，如 IAM / 证书认证，只告警，因为无法在这里验证。
 
-The validator is **not** a substitute for a thorough threat model — it catches the most common deployment mistakes, not all of them. Treat it as a smoke test.
+<a id="warnings-logged-app-starts"></a>
 
-## Production `.env` Checklist
+### 警告：记录后继续启动
 
-Generate a `.env` for production from `backend/.env.example`. The bare-minimum changes:
+真实流量前应修复：
+
+- Redis 未设密码，包括 CACHE_REDIS_PASSWORD、RATE_LIMITER_REDIS_PASSWORD 或无密码 SESSION_REDIS_URL。
+- DEBUG=true，可能暴露堆栈。
+- API 文档可访问，见下文。
+- 会话过于宽松，如未 Secure、过长有效期。
+- 可预测或常见后台凭据。
+
+校验器只捕获常见错误，不能替代完整威胁分析，应视为部署冒烟检查。
+
+<a id="production-env-checklist"></a>
+
+## 生产 .env 清单
+
+从 `backend/.env.example` 创建，至少修改：
 
 ```env
 # Environment
@@ -111,52 +108,56 @@ LOG_LEVEL=INFO
 LOG_FORMAT=json
 ```
 
-Notes worth calling out:
+说明：
 
-- **`EMAIL_BACKEND=smtp`** — `console` is refused in production: it logs every message in full, so password-reset and verification links would end up in the logs instead of being delivered. The same goes for a `FRONTEND_URL` only this machine can open, since every link is built from it. Both checks belong to the accounts feature and are skipped in a project that carries no accounts to email.
-- **`CREATE_TABLES_ON_STARTUP=false`** — the default outside local and development, and `true` is refused in production: schema changes go through Alembic, not `Base.metadata.create_all` on every boot.
-- **`SESSION_BACKEND` and `RATE_LIMITER_BACKEND` are not `memory`** — both are refused in production. A process that keeps sessions in itself signs everybody out when it restarts and knows nothing of the sessions its sibling created. A process that counts in itself multiplies every limit by the number of workers, and the backend carries more than the API throttle: the login lockout, the account-change budgets and an API key's own windows all count on it, whether or not the ratelimit feature is selected or `RATE_LIMITER_ENABLED` is on.
-- **`FRONTEND_URL` is HTTPS** — refused otherwise, along with a host only the deployment itself can reach: every verification, password-reset and email-change link is built from it, so a plaintext one carries its token where anybody on the path can read it.
-- **RabbitMQ's `guest` credentials are refused** — with `TASKIQ_BROKER_TYPE=rabbitmq`, `TASKIQ_RABBITMQ_USER`/`TASKIQ_RABBITMQ_PASSWORD` left at `guest`/`guest` means anybody who reaches the broker can enqueue a task the worker runs.
-- **`CONFIRM_PRODUCTION_MIGRATION=yes`** — `migrations/env.py` calls `validate_production_migration` which **refuses** to run migrations against production unless this is explicitly set. Ship deployment commands with it; never set it in long-lived env files.
-- **`SESSION_SECURE_COOKIES=true`** — cookies are sent only over HTTPS. Required if you're terminating TLS at a proxy.
-- **`OPENAPI_URL=`** (empty) disables the Swagger UI and OpenAPI spec entirely. The validator warns when this is exposed in production.
+- **EMAIL_BACKEND=smtp**：生产拒绝 console，否则完整重置 / 验证链接写日志而非投递。FRONTEND_URL 也必须可供收件人访问。无 accounts 功能时跳过这些账户邮件检查。
+- **CREATE_TABLES_ON_STARTUP=false**：local / development 之外默认关闭，生产拒绝 true，结构变更走 Alembic，不在每次启动 create_all。
+- **会话和限流后端不能 memory**：生产拒绝。进程本地会话重启丢失且多进程不共享；本地计数使限额随 Worker 倍增。该后端还承担登录锁定、账户变更预算、密钥窗口，无论是否选择 ratelimit 或开启 API 限流。
+- **FRONTEND_URL 必须 HTTPS**，不能是仅部署自身可达主机，否则验证、重置和改邮箱链接无效，明文链路也会暴露令牌。
+- **RabbitMQ 拒绝 guest / guest**：使用该代理时保留默认凭据，任何能连接的人都可能入队 Worker 执行的任务。
+- **CONFIRM_PRODUCTION_MIGRATION=yes**：`migrations/env.py` 的 validate_production_migration 要求明确确认。写在部署命令，不放长期环境文件。
+- **SESSION_SECURE_COOKIES=true**：仅 HTTPS 发送 Cookie，代理终止 TLS 时需要。
+- **OPENAPI_URL=** 留空：完全关闭 Swagger 和 OpenAPI，生产开放会告警。
 
-See [Configuration → Environment-Specific](configuration/environment-specific.md) for the full per-environment matrix.
+环境矩阵见[分环境配置](configuration/environment-specific.md)。
 
-## Generating a Strong `SECRET_KEY`
+<a id="generating-a-strong-secret_key"></a>
+
+## 生成强 SECRET_KEY
 
 ```bash
 openssl rand -hex 32
 ```
 
-Or:
+或：
 
 ```bash
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-Never reuse the dev key. Never commit prod keys. Pull from a secrets manager (AWS Secrets Manager, HashiCorp Vault, Doppler, etc.) at deploy time — `.env` files on disk are an audit-trail problem.
+不复用开发密钥，不提交生产密钥。部署时从 AWS Secrets Manager、Vault、Doppler 等获取；磁盘 .env 的管理还需考虑审计。
 
-## The Production Dockerfile
+<a id="the-production-dockerfile"></a>
 
-The boilerplate ships a multi-stage `backend/Dockerfile`:
+## 生产 Dockerfile
 
-| Stage              | Purpose                                          |
-|--------------------|--------------------------------------------------|
-| `requirements-stage` | Exports pinned requirements from `uv.lock`     |
-| `base`             | Production base — copies source, installs deps  |
-| `dev`              | Adds dev deps, mounts tests, runs `fastapi dev` |
-| `migrate`          | Runs `alembic upgrade head` and exits           |
-| `prod`             | Runs `fastapi run` with configurable workers   |
+多阶段 `backend/Dockerfile`：
 
-To build the production image:
+| 阶段 | 用途 |
+|------|------|
+| requirements-stage | 从 uv.lock 导出锁定依赖 |
+| base | 复制源码、安装生产依赖 |
+| dev | 开发依赖、测试，运行 fastapi dev |
+| migrate | 执行 alembic upgrade head 后退出 |
+| prod | fastapi run，可配置 Worker |
+
+构建生产镜像：
 
 ```bash
 docker build --target prod -t myapp-api:1.0.0 -f backend/Dockerfile .
 ```
 
-To run a one-off migration, build the `migrate` image and run it:
+一次性迁移构建并运行 migrate 镜像：
 
 ```bash
 docker build --target migrate -t myapp-migrate:1.0.0 -f backend/Dockerfile .
@@ -167,13 +168,13 @@ docker run --rm \
     myapp-migrate:1.0.0
 ```
 
-The `prod` stage's `CMD` is:
+prod 的 CMD：
 
 ```dockerfile
 CMD ["sh", "-c", "fastapi run interfaces/main.py --host 0.0.0.0 --port 8000 --workers $WORKERS"]
 ```
 
-`fastapi run` is FastAPI's production-friendly equivalent to `uvicorn` — it sets sane defaults (no `--reload`, properly configured logging, etc.) and is what the framework itself recommends. Override the worker count with `WORKERS` (defaults to 1):
+原文推荐 `fastapi run`，它封装 uvicorn，使用无 reload 等生产默认行为。通过 WORKERS 覆盖默认 1：
 
 ```bash
 docker run -d \
@@ -183,15 +184,19 @@ docker run -d \
     myapp-api:1.0.0
 ```
 
-### Picking a Worker Count
+<a id="picking-a-worker-count"></a>
 
-Rough rule: `2 × CPU cores + 1` for I/O-bound workloads, fewer for CPU-bound. Each worker is a separate process; they don't share memory. Caches and DB pools are per-worker — bring `POSTGRES_POOL_SIZE` down if you're scaling workers up.
+### 选择 Worker 数量
 
-For most APIs, **don't reach for gunicorn**. `fastapi run` (which wraps uvicorn) handles process management fine. Add a process supervisor (Kubernetes, ECS, systemd, supervisord) at the orchestration layer.
+原文给出的粗略起点是 I/O 负载 `2 × CPU 核数 + 1`，CPU 密集更少，应按实际负载测量。每 Worker 独立进程，不共享内存，数据库池也独立，扩进程时应降低 POSTGRES_POOL_SIZE。
 
-## Running the Background Worker
+多数 API 不必额外使用 gunicorn，fastapi run / uvicorn 可管理进程，编排层使用 Kubernetes、ECS、systemd 或 supervisord。
 
-In production, run a separate worker container/service:
+<a id="running-the-background-worker"></a>
+
+## 后台 Worker
+
+生产使用独立容器 / 服务：
 
 ```bash
 docker run -d \
@@ -201,9 +206,9 @@ docker run -d \
     sh -c "taskiq worker src.infrastructure.taskiq.worker:default_broker --workers 4"
 ```
 
-In Kubernetes / ECS, that's a separate `Deployment` / `Service` with its own scaling. The worker doesn't accept HTTP traffic — it only consumes from the broker.
+Kubernetes / ECS 作为独立 Deployment / Service 扩容，不接 HTTP，只消费代理。
 
-If any task declares a `schedule` label, one scheduler has to run too, and **only one** — each scheduler enqueues every schedule it finds, so two of them run every cron entry twice:
+任务含 schedule 标签时还需**一个且仅一个**调度器，多个会重复入队：
 
 ```bash
 docker run -d \
@@ -213,16 +218,13 @@ docker run -d \
     sh -c "taskiq scheduler src.infrastructure.taskiq.scheduler:scheduler"
 ```
 
-Tune via:
+`--workers <N>` 控制进程数，`--max-async-tasks <N>` 控制每进程异步并发。完整配置见[后台任务](background-tasks/index.md)。
 
-- `--workers <N>` — process count
-- taskiq's `--max-async-tasks <N>` — async tasks per process
+<a id="database-migrations-in-production"></a>
 
-See [Background Tasks](background-tasks/index.md) for the full Taskiq setup.
+## 生产数据库迁移
 
-## Database Migrations in Production
-
-The migration env (`backend/migrations/env.py`) calls `validate_production_migration` at the start of every Alembic run. In production:
+每次 Alembic 都由 `backend/migrations/env.py` 调用生产迁移校验：
 
 ```bash
 # Will FAIL — refuses to run without confirmation
@@ -232,19 +234,19 @@ CONFIRM_PRODUCTION_MIGRATION=  alembic upgrade head
 CONFIRM_PRODUCTION_MIGRATION=yes alembic upgrade head
 ```
 
-This is intentional: `alembic upgrade head` should not be a routine boot-time command. Run migrations as a deliberate step in your deployment pipeline:
+迁移应是明确部署步骤，而非常规启动命令：
 
-1. Build the new image
-2. Build & run the `migrate` image with `CONFIRM_PRODUCTION_MIGRATION=yes`
-3. **Then** roll out the API container
+1. 构建新镜像。
+2. 带 `CONFIRM_PRODUCTION_MIGRATION=yes` 构建并运行 migrate。
+3. **然后**部署 API 容器。
 
-If your pipeline runs migrations after rollout, you can briefly serve a new code version against an old schema. Don't do that.
+先部署后迁移可能让新代码访问旧结构。零停机变更分 expand / contract 两阶段，见[迁移](database/migrations.md)。
 
-For zero-downtime deploys, do schema changes in two phases — see [Database → Migrations](database/migrations.md) for the expand/contract pattern.
+<a id="tls-reverse-proxy-and-cors"></a>
 
-## TLS, Reverse Proxy, and CORS
+## TLS、反向代理与 CORS
 
-The boilerplate doesn't terminate TLS — that's your reverse proxy's job (Nginx, Caddy, ALB, Cloud Run's built-in TLS, etc.). Common deployment shapes:
+模板不终止 TLS，由 Nginx、Caddy、ALB、Cloud Run 等负责。常见结构：
 
 ```text
 [Client] → HTTPS → [Reverse Proxy] → HTTP → [API container]
@@ -252,67 +254,42 @@ The boilerplate doesn't terminate TLS — that's your reverse proxy's job (Nginx
                                   → HTTP → [API container]
 ```
 
-The proxy must:
+代理需要转发 `X-Forwarded-Proto: https` 和真实客户端 X-Forwarded-For，保留 Set-Cookie，并正确设置 Host。是否信任转发头还需以下配置。
 
-- Forward `X-Forwarded-Proto: https` and `X-Forwarded-For: <client_ip>` (FastAPI / Starlette respect these by default)
-- Pass through cookies (`Set-Cookie`) untouched
-- Set `Host` correctly so the API's URL building works
+`TRUSTED_PROXY_HOPS` 为前方代理数量，单 nginx / Caddy 为 1，前面还有 Cloudflare 为 2。crudauth 从 X-Forwarded-For 右侧可信跳读取真实 IP，避免所有登录共用代理 IP 的预算。
 
-Set `TRUSTED_PROXY_HOPS` to the number of reverse proxies you've put in front of the app (1 for a single nginx/Caddy, 2 if Cloudflare is also in front). crudauth uses it to read the real client IP from the last trusted hop of `X-Forwarded-For` when applying login lockout — otherwise every request would appear to come from the proxy and the lockout would key on a single IP.
+**FORWARDED_ALLOW_IPS** 由 uvicorn 从进程环境读取，不经过应用配置，控制 request.client 和访问日志。通配符会取最左值，可由客户端伪造地址和 HTTPS 声明。指定网段后跳过可信网段条目，读取最后一个外部地址。生成 nginx 默认以自身看到的地址覆盖 X-Forwarded-For，只有一项；生成服务固定容器网段并配置对应 CIDR。`bp deploy generate nginx --internal-subnet 10.20.30.0/24` 同时改两处，拒绝带主机位、通配符、IPv4 比 /8 更宽或 IPv6 比 /48 更宽的范围。
 
-Set `FORWARDED_ALLOW_IPS` to your proxy's address or subnet. **uvicorn** reads it from its own process environment, not through the app's settings, and it decides what `request.client` and the access logs report. A wildcard makes uvicorn take the *leftmost* `X-Forwarded-For` entry, which is whatever the client sent, so any client can claim any address and say its request arrived over HTTPS. Named a subnet, uvicorn skips the entries from that subnet and reads the last one outside it. The generated nginx vhost also replaces `X-Forwarded-For` with the address nginx saw, so there is only ever one entry to read. The generated stack puts the containers on a fixed subnet and sets this to that CIDR; `bp deploy generate nginx --internal-subnet 10.20.30.0/24` changes both together, and refuses host bits, a wildcard, or a range wider than `/8` (IPv4) or `/48` (IPv6).
+!!! warning "生成配置假定 nginx 是唯一代理"
+    覆盖 X-Forwarded-For 会丢弃已有信息，适合 nginx 直面客户端；若前有负载均衡、Cloudflare 或另一代理，需一起修改：恢复 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`；增加 TRUSTED_PROXY_HOPS；在 FORWARDED_ALLOW_IPS 中除 Compose 网段外加入上游代理地址或网段。否则 uvicorn 停在负载均衡条目，把它当客户端；crudauth 按右侧跳数解析，因此跳数正确时其限流仍可正确。
 
-!!! warning "nginx is the only hop in the generated stack"
+!!! note "Docker Desktop 的 IP 限制"
+    macOS / Windows Docker Desktop、rootless Docker 等经 userland proxy 时，nginx 可能只看到网关地址，所有客户端共用登录和匿名预算。Linux bridge 通常保留真实地址。逐 IP 行为应在 Linux 宿主机或真实代理前测试。
 
-    Replacing `X-Forwarded-For` discards whatever arrived in it. That is what you want when nginx
-    is the first thing a client reaches, and wrong as soon as something else sits in front of it —
-    a cloud load balancer, Cloudflare, another nginx. In that setup the client address arrives in
-    the header, so three settings change together:
+CORS_ORIGINS 应列**前端源**而非 API 源。通配符与凭据请求不兼容，生产校验拒绝。
 
-    - edit the generated `nginx/default.conf` back to
-      `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`, so the entries from upstream
-      survive;
-    - raise `TRUSTED_PROXY_HOPS` to the number of proxies in front of the app, so crudauth skips
-      their entries and reads the client's;
-    - add the upstream proxy's address or subnet to `FORWARDED_ALLOW_IPS`, alongside the compose
-      network. uvicorn trusts only the peers named there, so with the generated value alone it
-      stops at the load balancer's entry and reports *that* as `request.client` and in the access
-      logs. crudauth's per-IP limits stay correct either way once `TRUSTED_PROXY_HOPS` is right,
-      since it counts hops from the right itself.
+<a id="logging-in-production"></a>
 
-!!! note "Per-IP limits on Docker Desktop"
+## 生产日志
 
-    Where Docker's userland proxy carries the connection — Docker Desktop on macOS and Windows,
-    rootless Docker — nginx sees every client as the network gateway, so `$remote_addr` is the same
-    address for everyone and anything keyed per IP (the login lockout, an anonymous rate limit) is
-    shared across clients. On a Linux host with the bridge driver, nginx sees the real client
-    addresses. Test per-IP behaviour on a Linux host, or in front of a real proxy.
-
-`CORS_ORIGINS` should list your **frontend** origins, not the API origin. A wildcard (`*`) is incompatible with credentialed requests anyway, and the production validator refuses to start with one.
-
-## Logging in Production
-
-Use JSON log output for ingestion into your log aggregator:
+JSON 方便聚合：
 
 ```env
 LOG_LEVEL=INFO
 LOG_FORMAT=json
 ```
 
-`infrastructure/logging/` ships the pieces for a correlation ID — a context variable, a `CorrelationIdFilter`, `set_correlation_id()` and `add_correlation_id_filter()` — but nothing installs them, so log lines carry no request id out of the box. Wire it up with middleware that calls `set_correlation_id()` per request and `add_correlation_id_filter()` at startup; the `structured` and `json` formats then carry the field. The catch-all error handler already logs a support id per failed request, which is what ties a user's report to a server-side trace today.
+`infrastructure/logging/` 提供关联 ID 的上下文变量、CorrelationIdFilter、set_correlation_id、add_correlation_id_filter，但未安装，默认日志没有请求 ID。需自行添加中间件逐请求设置，并启动时装过滤器，structured / json 才包含字段。错误处理器已有失败请求 support id，可关联反馈与服务端日志。
 
-For lower-noise production logs:
+低噪声配置建议 INFO，WARNING 会跳过请求日志，不利排障。健康轮询等低信息日志在代理或聚合器采样，而非应用。
 
-- `LOG_LEVEL=INFO` is the right default. `WARNING` skips request logs, which makes incident debugging harder.
-- Sample low-information lines (health-check polls, etc.) at the proxy or aggregator, not in the app.
+追踪和指标未内置，见[可观测性](observability.md)。本节原文建议接入 src/wiring/app.py，但该专章说明生成文件应避免手改，示例实际接入 main.py。
 
-For tracing and metrics, there is no built-in hook: [Observability](observability.md) says what the
-project emits today and how to wire Logfire or another OpenTelemetry exporter into
-`src/wiring/app.py`.
+<a id="health-and-readiness"></a>
 
-## Health and Readiness
+## 健康与就绪
 
-The boilerplate ships a `GET /health` endpoint, mounted on the app rather than under the API prefix. Use it as your liveness probe:
+应用根路径 GET /health 用作存活探针：
 
 ```yaml
 # Kubernetes / Docker probe
@@ -324,11 +301,11 @@ livenessProbe:
   periodSeconds: 10
 ```
 
-For a **readiness** probe (does the app actually have working DB / Redis connections?), use `GET /health/ready`. It runs the checks the project's wiring lists, in two groups:
+GET /health/ready 验证真实数据库、Redis 连接，执行 wiring 列出的两组检查：
 
-- `CRITICAL_READINESS_CHECKS` — the database, the schema, plus the login lockout's Redis and the session store when accounts is wired. A request can't be served without these, so one of them being unreachable answers `503` and a load balancer holds traffic back.
-    - The `schema` check asks whether the database carries the schema this code was written against. Where the project has migrations, it compares the database's revision with their head, so a database one migration behind — every table present, a column missing — answers `503` rather than failing requests one by one. Where there are none, or where `CREATE_TABLES_ON_STARTUP` built the schema, it compares the tables the models declare against the tables that exist. It names no server, so it is always asked rather than mirrored from the `database` check, and it reads `alembic.ini` from beside the source tree rather than from the working directory.
-- `INFORMATIONAL_READINESS_CHECKS` — the cache and the task broker. No request waits on either, so an outage there is logged and the answer stays `200`. A Redis broker is pinged; a RabbitMQ one is reported on over the live state of the connection the app holds, which reads as unavailable while that connection is being opened or reconnected.
+- **CRITICAL_READINESS_CHECKS**：数据库、结构，以及 accounts 的登录锁定 Redis 和会话存储。任一不可达则 503，负载均衡停止分流。
+- **schema** 属关键项：有迁移时比较数据库 revision 与代码 head，避免表齐全但缺列逐请求失败；没有迁移或自动建表时比较模型声明的表与实际表。它不按服务器去重，始终执行，并从源码旁而非 cwd 读取 alembic.ini。
+- **INFORMATIONAL_READINESS_CHECKS**：缓存和任务代理。故障写日志但保持 200，因为请求不应等待它们。Redis ping，RabbitMQ 读取现有连接状态，正在连接或重连时不可用。
 
 ```yaml
 readinessProbe:
@@ -339,15 +316,13 @@ readinessProbe:
   periodSeconds: 10
 ```
 
-The body carries the overall status and nothing else:
+响应体只含整体状态：
 
 ```json
 { "status": "ready" }
 ```
 
-A `database`, `rate_limiter` or `sessions` outage answers `503` with `{"status": "not ready"}`. Which
-dependency answered what stays in the log, where a probe that found something unreachable writes a
-line naming it:
+database、rate_limiter、sessions 故障返回 `503` 和 `{"status": "not ready"}`，具体项仅写日志：
 
 ```text
 WARNING Readiness check cache failed: ConnectionError
@@ -356,111 +331,125 @@ ERROR   Readiness: database unavailable, holding traffic back
 ERROR   Readiness check schema failed: RuntimeError
 ```
 
-The `schema` line's own message names what it found: `the database is at 9e1c2f7a4b10, the code
-expects b3d84c2e5f91`, or `the database is missing 3 table(s) the models declare: api_keys,
-key_usage, user` where the project has no migrations.
+schema 日志说明实际差异，例如 `the database is at 9e1c2f7a4b10, the code expects b3d84c2e5f91`，无迁移时列缺表如 api_keys、key_usage、user。
 
-Each check runs with its own two-second timeout, and they all run together, so one blackholed
-server can't hold the probe open. Two checks pointed at the same server are asked once - the server
-is the scheme, the credentials, the host and the port, so a cache on Redis database 0 and sessions
-on database 1 of one server count as one, while two checks reaching one host as different users are
-asked separately: what one password opens says nothing about what another one does. The credentials
-go into that identity as a slow derivation, read once per pair and kept for the process, so neither
-the password nor anything a word list could be run against is what the probe holds. Probes that arrive together share one run of the checks, and its report is
-reused for a couple of seconds, so a flood of probes can't take the database pool away from real
-requests.
+每项两秒超时，并发执行，单个黑洞服务器不会长时间阻塞。同一服务器按 scheme、凭据、主机、端口去重，Redis 不同 DB 仍可共享一次检查，不同用户则分开，因为一项凭据成功不能证明另一项。凭据身份通过慢派生生成，按凭据对缓存进程内，探针不保留密码或可直接跑字典的摘要。并发探针共用一次运行，报告复用数秒，避免探针洪水抢数据库连接。
 
-Neither health route is throttled, and both stay out of the API prefix so an API-wide rate limit or auth dependency can't take your probes down. To report on something else this project needs, contribute a `ReadinessCheck` from the feature that owns it and list it in `src/wiring/hooks.py` — under `CRITICAL_READINESS_CHECKS` when a request can't be served without it, under `INFORMATIONAL_READINESS_CHECKS` otherwise. See [Composable Features](composable-features.md).
+两个健康接口都在 API 前缀外且不受限流，避免 API 认证和配额影响探针。其他依赖由所属功能贡献 ReadinessCheck，在 src/wiring/hooks.py 按关键或信息项列出，见[可组合功能](composable-features.md)。
 
-## Hardening Checklist
+<a id="hardening-checklist"></a>
 
-Before shipping:
+## 加固清单
 
-- [ ] `ENVIRONMENT=production` in the runtime
-- [ ] `SECRET_KEY` is fresh, > 32 chars, never seen anywhere else
-- [ ] `POSTGRES_PASSWORD` is unique and pulled from a secrets manager
-- [ ] `DEBUG=false` (validator warns otherwise)
-- [ ] `CORS_ORIGINS` lists only your frontend origins; no `*`
-- [ ] `OPENAPI_URL=` (empty) — `/docs` and `/redoc` are not exposed
-- [ ] `SESSION_SECURE_COOKIES=true` and you're terminating TLS at a proxy
-- [ ] `CSRF_ENABLED=true`
-- [ ] All Redis instances have `*_REDIS_PASSWORD` set
-- [ ] `ADMIN_ENABLED=false` (or restricted at the network layer)
-- [ ] Database migrations run via the `migrate` Dockerfile stage with `CONFIRM_PRODUCTION_MIGRATION=yes`
-- [ ] `EMAIL_BACKEND=smtp`, with `EMAIL_SMTP_*` configured, and `FRONTEND_URL` set to the project's own frontend (both only where the accounts feature is present)
-- [ ] `CREATE_TABLES_ON_STARTUP=false`
-- [ ] `SESSION_BACKEND` and `RATE_LIMITER_BACKEND` on `redis` or `database`, not `memory`
-- [ ] `FRONTEND_URL` on `https://`
-- [ ] RabbitMQ credentials of the project's own, where the queue runs on RabbitMQ
-- [ ] Pre-commit and CI are running on every PR (lint, mypy, tests)
-- [ ] Backups configured for the production database and Redis (if you're using Redis for sessions / state you can't lose)
-- [ ] Monitoring set up: error rates, latency p95/p99, DB connection saturation, queue depth, Redis memory
+- [ ] 运行环境 ENVIRONMENT=production。
+- [ ] SECRET_KEY 独立随机、超过 32 字符、未复用。
+- [ ] 数据库密码独立，从密钥管理器获取。
+- [ ] DEBUG=false。
+- [ ] CORS_ORIGINS 仅前端源，无通配符。
+- [ ] OPENAPI_URL 留空，不开放 docs / redoc。
+- [ ] SESSION_SECURE_COOKIES=true，代理终止 TLS。
+- [ ] CSRF_ENABLED=true。
+- [ ] 所有 Redis 设置密码。
+- [ ] ADMIN_ENABLED=false 或网络访问限制。
+- [ ] 迁移通过 migrate 阶段并显式确认。
+- [ ] accounts 存在时使用 SMTP、正确 EMAIL_SMTP 配置及项目前端 FRONTEND_URL。
+- [ ] CREATE_TABLES_ON_STARTUP=false。
+- [ ] SESSION_BACKEND、RATE_LIMITER_BACKEND 为 redis 或 database，不能 memory。
+- [ ] FRONTEND_URL 为 HTTPS。
+- [ ] RabbitMQ 使用项目独立凭据。
+- [ ] 每 PR 运行 pre-commit 和 CI：lint、mypy、测试。
+- [ ] 数据库备份；Redis 用于不可丢会话 / 状态时也备份。
+- [ ] 监控错误率、p95 / p99 延迟、数据库连接、队列深度和 Redis 内存。
 
-## Scaling Considerations
+<a id="scaling-considerations"></a>
 
-### API instances
+## 扩容
 
-Horizontal scaling is straightforward — add more `prod` containers behind your load balancer. Sessions are stored in Redis (when `SESSION_BACKEND=redis`), so any instance can serve any user.
+<a id="api-instances"></a>
 
-If you're stuck on `SESSION_BACKEND=memory`, you can't horizontally scale safely: each instance has its own session table. Switch backends before scaling — to `redis`, or to `database`, which shares sessions and login-lockout counters through this project's own database and needs no Redis at all.
+### API 实例
 
-### Database
+负载均衡后添加 prod 容器即可。Redis 会话使任意实例可服务任意用户。memory 不适合水平扩容，应改 redis 或 database，后者通过项目数据库共享会话和登录计数，无需 Redis。
 
-Watch `database_pool_size × api_workers + worker_concurrency × taskiq_workers` against your Postgres `max_connections`. Common pitfall: 4 API workers × 10 pool size = 40 connections per API replica, easy to blow past 100 connection cap with two replicas + Taskiq.
+<a id="database"></a>
 
-Use a connection pooler (PgBouncer, RDS Proxy) at scale. The boilerplate's `DATABASE_URL` accepts a pooler endpoint identically.
+### 数据库
 
-Managed Postgres works the same way — point `DATABASE_URL` at the provider and leave the rest of the config alone. [Neon](database/neon.md) (serverless, scale-to-zero, database branching for preview environments) is the setup we document end to end, including the TLS parameter, pooled vs. direct endpoints, and pool tuning for a compute that suspends when idle.
+将 `database_pool_size × api_workers + worker_concurrency × taskiq_workers` 与 Postgres max_connections 对比。4 API Worker × 10 池大小为每副本 40，两个副本加 Taskiq 很容易超过 100。
+
+大规模使用 PgBouncer / RDS Proxy，DATABASE_URL 同样可指向池端点。托管 Postgres 方式相同，[Neon](database/neon.md) 提供 TLS、池与直连、空闲暂停调优及预览数据库分支的完整说明。
+
+<a id="redis"></a>
 
 ### Redis
 
-The defaults use four separate DB numbers (`CACHE_REDIS_DB=0`, `RATE_LIMITER_REDIS_DB=1`, `SESSION_REDIS_DB=2`, `TASKIQ_REDIS_DB=3`) on the **same** Redis instance. Fine for small deployments. At scale, split sessions and the cache onto different Redis clusters — sessions are small and durability-sensitive; the cache is large, eviction-tolerant, and high-traffic. Mixing them puts your sessions at risk during cache memory pressure. Sessions follow the cache's Redis connection by default; set `SESSION_REDIS_URL` (e.g. `rediss://user:password@sessions-redis:6380/0`) to give them their own instance.
+默认同实例四个 DB：缓存 0、限流 1、会话 2、Taskiq 3，适合小部署。规模扩大应将会话与缓存分离实例或集群：会话小且重持久，缓存大、容忍驱逐且高流量，共用可能使缓存内存压力危及会话。会话默认复用缓存连接，用 `SESSION_REDIS_URL` 如 `rediss://user:password@sessions-redis:6380/0` 独立配置。
 
-The limiter's Redis (`RATE_LIMITER_REDIS_*`) is a hard dependency of logging in: the login lockout fails **closed**, so while that instance is unreachable every login is refused with `429`. Alert on it. See [Sessions → Login Lockout](authentication/sessions.md#login-lockout).
+限流 Redis 是登录硬依赖，锁定失败拒绝，不可达时全部登录 429，应告警，见[登录锁定](authentication/sessions.md#login-lockout)。
 
-### Taskiq workers
+<a id="taskiq-workers"></a>
 
-Worker scaling is independent of API scaling. If your tasks become a bottleneck, scale the worker `Deployment` without touching the API.
+### Taskiq Worker
 
-## Common Production Issues
+与 API 独立扩容，任务成为瓶颈时只增加 Worker Deployment。
 
-### "App fails to boot with `ProductionSecurityError`"
+<a id="common-production-issues"></a>
 
-Read the message — it tells you which check failed. Don't bypass it; fix the underlying config.
+## 常见生产问题
 
-### "Sessions invalidate after every deploy"
+<a id="app-fails-to-boot-with-productionsecurityerror"></a>
 
-You're on `SESSION_BACKEND=memory`. Switch to `redis` — sessions use the cache's Redis connection, or `SESSION_REDIS_URL` when set — or to `database`, which stores them in `crudauth_store` beside your own tables. (Memcached is not a session backend.)
+### 启动 ProductionSecurityError
 
-### "Sudden burst of 429s after a config change"
+按消息修配置，不绕过。
 
-Check that your rate-limit rule rows still match the routes. After path renames or sanitization rule changes, the lookup may miss and apply the (often tighter) `DEFAULT_RATE_LIMIT_LIMIT` instead.
+<a id="sessions-invalidate-after-every-deploy"></a>
 
-### "Cache backend not available" warnings under load
+### 每次部署会话失效
 
-Pool exhaustion. Bump `CACHE_REDIS_POOL_SIZE` (default 10), check Redis memory pressure, look for connection leaks in your application code.
+检查是否 memory，改 Redis（缓存连接或专用 SESSION_REDIS_URL）或 database 的 crudauth_store；Memcached 不是会话后端。
 
-### "Tasks queue but no worker picks them up"
+<a id="sudden-burst-of-429s-after-a-config-change"></a>
 
-The worker process isn't running, isn't pointed at the same Redis, or hasn't imported the task module. See [Background Tasks → Troubleshooting](background-tasks/index.md#troubleshooting).
+### 改配置后大量 429
 
-### "404 on `/admin` after deploy"
+检查限流路径是否仍匹配。重命名或路径规则变化可能回退到更严格的默认限制。
 
-`ADMIN_ENABLED=false`. Either enable it (and lock it down at the network layer) or run admin tasks through scripts.
+<a id="cache-backend-not-available-warnings-under-load"></a>
 
-## Key Files
+### 高负载提示 Cache backend not available
 
-| Component                         | Location                                                          |
-|-----------------------------------|-------------------------------------------------------------------|
-| Production validator              | `backend/src/infrastructure/security/production_validator.py`     |
-| Migration validator               | `backend/migrations/env.py:validate_production_migration`         |
-| Multi-stage Dockerfile            | `backend/Dockerfile`                                              |
-| Settings                          | `backend/src/infrastructure/config/settings.py`                   |
-| App factory / lifespan            | `backend/src/infrastructure/app_factory.py`                       |
+可能连接池耗尽，提高默认 10 的 CACHE_REDIS_POOL_SIZE，检查内存压力及连接泄漏。
 
-## Next Steps
+<a id="tasks-queue-but-no-worker-picks-them-up"></a>
 
-- **[Configuration → Environment-Specific](configuration/environment-specific.md)** — per-environment env-var matrix
-- **[Database → Migrations](database/migrations.md)** — zero-downtime schema-change patterns
-- **[Authentication → Sessions](authentication/sessions.md)** — production session configuration
-- **[Testing](testing.md)** — the test setup that ships with the boilerplate
+### 任务入队但不执行
+
+Worker 未运行、代理不同或未导入任务，见[后台任务排查](background-tasks/index.md#troubleshooting)。
+
+<a id="404-on-admin-after-deploy"></a>
+
+### 部署后 /admin 404
+
+检查 ADMIN_ENABLED；启用时加网络限制，或改用脚本。缺凭据也可能不挂载，见后台配置。
+
+<a id="key-files"></a>
+
+## 关键文件
+
+| 组件 | 位置 |
+|------|------|
+| 生产校验 | `backend/src/infrastructure/security/production_validator.py` |
+| 迁移校验 | `backend/migrations/env.py:validate_production_migration` |
+| 多阶段镜像 | `backend/Dockerfile` |
+| 配置 | `backend/src/infrastructure/config/settings.py` |
+| 应用工厂 / 生命周期 | `backend/src/infrastructure/app_factory.py` |
+
+<a id="next-steps"></a>
+
+## 后续步骤
+
+- **[分环境配置](configuration/environment-specific.md)**：环境变量矩阵。
+- **[迁移](database/migrations.md)**：结构变更模式。
+- **[会话](authentication/sessions.md)**：生产会话配置。
+- **[测试](testing.md)**：随附测试环境。

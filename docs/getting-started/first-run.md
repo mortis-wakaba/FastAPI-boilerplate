@@ -1,12 +1,18 @@
-# First Run Guide
+<a id="first-run-guide"></a>
 
-This guide walks you through verifying your installation, creating the admin user, and testing the main features. It picks up where [Installation](installation.md) leaves off, with the app already running: the commands below reach a stack that is up, rather than starting one.
+# 首次运行指南
 
-## Verification Checklist
+本指南介绍如何验证安装、创建管理员并测试主要功能。它接续[安装指南](installation.md)，假定应用已经运行；下方命令用于访问已启动的服务。
 
-Before diving deeper, verify everything is working.
+<a id="verification-checklist"></a>
 
-### 1. Check Services
+## 验证清单
+
+深入开发前，先确认各项功能正常。
+
+<a id="1-check-services"></a>
+
+### 1. 检查服务
 
 === "Docker Compose"
 
@@ -14,31 +20,35 @@ Before diving deeper, verify everything is working.
     docker compose ps
     ```
 
-    You should see the `api`, `worker`, `postgres` and `redis` services in `running` state.
+    应看到 `api`、`worker`、`postgres` 和 `redis` 服务处于 `running` 状态。
 
-=== "Local with uv"
+=== "使用 uv 在本地运行"
 
-    Verify Postgres and Redis are reachable:
+    确认可以连接 Postgres 和 Redis：
 
     ```bash
     pg_isready -h localhost -p 5432
     redis-cli ping  # should print PONG
     ```
 
-### 2. Test API Documentation
+<a id="2-test-api-documentation"></a>
 
-Open these in a browser:
+### 2. 测试 API 文档
 
-- **Swagger UI**: <http://localhost:8000/docs>
-- **ReDoc**: <http://localhost:8000/redoc>
+在浏览器中打开：
 
-### 3. Health Check
+- **Swagger UI**：<http://localhost:8000/docs>
+- **ReDoc**：<http://localhost:8000/redoc>
+
+<a id="3-health-check"></a>
+
+### 3. 健康检查
 
 ```bash
 curl http://localhost:8000/health
 ```
 
-Expected response:
+预期响应：
 
 ```json
 {
@@ -46,9 +56,11 @@ Expected response:
 }
 ```
 
-### 4. Database Tables
+<a id="4-database-tables"></a>
 
-Check that tables were created:
+### 4. 数据库表
+
+检查表是否已经创建：
 
 === "Docker Compose"
 
@@ -56,24 +68,28 @@ Check that tables were created:
     docker compose exec postgres psql -U postgres -d postgres -c "\dt"
     ```
 
-=== "Local with uv"
+=== "使用 uv 在本地运行"
 
     ```bash
     psql -h localhost -U postgres -d postgres -c "\dt"
     ```
 
-You should see tables like `user`, `tiers`, `rate_limits`, `api_keys`, `key_usage`.
+应看到 `user`、`tiers`、`rate_limits`、`api_keys`、`key_usage` 等表。
 
-## Initial Setup
+<a id="initial-setup"></a>
 
-Create the first admin user and the default tier.
+## 初始设置
 
-!!! warning "Prerequisites"
-    Make sure the database tables are created before running this. With `CREATE_TABLES_ON_STARTUP=true` (the default in local and development), this happens automatically the first time the app boots.
+创建首个管理员用户和默认用户等级。
 
-### Create Admin User and Default Tier
+!!! warning "前置条件"
+    执行前确保数据库表已经创建。`CREATE_TABLES_ON_STARTUP=true` 时（local 和 development 环境的默认值），应用首次启动会自动建表。
 
-The admin credentials come from `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_USERNAME`, and `ADMIN_PASSWORD` in `backend/.env`.
+<a id="create-admin-user-and-default-tier"></a>
+
+### 创建管理员和默认等级
+
+管理员凭据来自 `backend/.env` 中的 `ADMIN_NAME`、`ADMIN_EMAIL`、`ADMIN_USERNAME` 和 `ADMIN_PASSWORD`。
 
 === "Docker Compose"
 
@@ -81,25 +97,31 @@ The admin credentials come from `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_USERNAME`, a
     docker compose exec api python -m scripts.setup_initial_data
     ```
 
-=== "Local with uv"
+=== "使用 uv 在本地运行"
 
     ```bash
     cd backend
     uv run --no-sync python -m scripts.setup_initial_data
     ```
 
-This creates:
+这会创建：
 
-- A default tier (used as the fallback for new users)
-- The admin user (with `is_superuser=true`)
+- 默认用户等级，作为新用户的兜底等级。
+- 管理员用户，其 `is_superuser=true`。
 
-## Testing Core Features
+<a id="testing-core-features"></a>
 
-### Authentication Flow (Sessions)
+## 测试核心功能
 
-This boilerplate uses **server-side sessions** with HTTP-only cookies — no JWT.
+<a id="authentication-flow-sessions"></a>
 
-#### 1. Log In
+### 认证流程（会话）
+
+本模板使用**服务端会话**和 HttpOnly Cookie，不使用 JWT。
+
+<a id="1-log-in"></a>
+
+#### 1. 登录
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/auth/login" \
@@ -108,21 +130,25 @@ curl -X POST "http://localhost:8000/api/v1/auth/login" \
   -c cookies.txt
 ```
 
-Response sets an HTTP-only `session_id` cookie and returns a CSRF token:
+响应设置 HttpOnly 的 `session_id` Cookie，并返回 CSRF 令牌：
 
 ```json
 { "id": 1, "username": "admin", "csrf_token": "..." }
 ```
 
-`cookies.txt` now holds your session — pass it back with `-b cookies.txt` on subsequent requests.
+`cookies.txt` 现在保存了会话，后续请求通过 `-b cookies.txt` 携带。
 
-#### 2. Get the Current User
+<a id="2-get-the-current-user"></a>
+
+#### 2. 获取当前用户
 
 ```bash
 curl http://localhost:8000/api/v1/users/me -b cookies.txt
 ```
 
-#### 3. Create a New User
+<a id="3-create-a-new-user"></a>
+
+#### 3. 创建新用户
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/users/" \
@@ -135,25 +161,31 @@ curl -X POST "http://localhost:8000/api/v1/users/" \
   }'
 ```
 
-(User creation is open — no auth required.)
+创建用户是开放操作，无需认证。
 
-#### 4. Check Auth Status
+<a id="4-check-auth-status"></a>
+
+#### 4. 检查认证状态
 
 ```bash
 curl http://localhost:8000/api/v1/auth/check-auth -b cookies.txt
 ```
 
-Returns `{"authenticated": true, "user": {...}, "session": {...}}` when logged in.
+已登录时返回 `{"authenticated": true, "user": {...}, "session": {...}}`。
 
-#### 5. Log Out
+<a id="5-log-out"></a>
+
+#### 5. 退出登录
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/auth/logout" -b cookies.txt -c cookies.txt
 ```
 
-### API Keys
+<a id="api-keys"></a>
 
-For programmatic access (machine-to-machine clients), create an API key while logged in:
+### API 密钥
+
+如需程序化访问（机器间调用），登录后创建 API 密钥：
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/api-keys/" \
@@ -166,21 +198,23 @@ curl -X POST "http://localhost:8000/api/v1/api-keys/" \
   }'
 ```
 
-⚠️ **The full API key is shown once in the response.** Store it securely.
+⚠️ **完整 API 密钥只会在响应中显示一次。** 请妥善保存。
 
-Call with it in the `X-API-Key` header, which authenticates the request as the key's owner:
+调用时将密钥放入 `X-API-Key` 请求头，请求会以密钥所有者的身份认证：
 
 ```bash
 curl http://localhost:8000/api/v1/auth/me -H "X-API-Key: fai_..."
 ```
 
-List your keys:
+列出自己的密钥：
 
 ```bash
 curl http://localhost:8000/api/v1/api-keys/ -b cookies.txt
 ```
 
-### Tiers and Rate Limits
+<a id="tiers-and-rate-limits"></a>
+
+### 用户等级和限流
 
 ```bash
 # List tiers
@@ -193,35 +227,45 @@ curl http://localhost:8000/api/v1/tiers/free
 curl http://localhost:8000/api/v1/rate-limits/
 ```
 
-### Caching
+<a id="caching"></a>
 
-Repeat a request twice and watch the timing — the second one should hit Redis:
+### 缓存
+
+连续发送两次相同请求，观察耗时；第二次应命中 Redis：
 
 ```bash
 curl http://localhost:8000/api/v1/users/johndoe -b cookies.txt -w "\nTime: %{time_total}s\n"
 curl http://localhost:8000/api/v1/users/johndoe -b cookies.txt -w "\nTime: %{time_total}s\n"
 ```
 
-### Background Tasks (Taskiq)
+<a id="background-tasks-taskiq"></a>
 
-Background processing is enabled out of the box but no example endpoint ships with the starter. To register and dispatch your own task, see [Background Tasks](../user-guide/background-tasks/index.md).
+### 后台任务（Taskiq）
 
-To start a worker locally:
+后台处理开箱即用，但模板没有附带任务示例接口。注册并分发自己的任务，见[后台任务](../user-guide/background-tasks/index.md)。
+
+本地启动 Worker：
 
 ```bash
 cd backend
 uv run --no-sync taskiq worker src.infrastructure.taskiq.worker:default_broker
 ```
 
-## Adding Your First Feature Module
+<a id="adding-your-first-feature-module"></a>
 
-The codebase uses **vertical-slice modules** — each feature owns its models, schemas, CRUD, service, and routes in one folder under `backend/src/modules/`.
+## 添加首个功能模块
 
-For a step-by-step walkthrough of adding a new module, see the [Development Guide](../user-guide/development.md).
+代码库按**业务功能纵向划分模块**：每个功能的模型、Schema、CRUD、服务和路由都集中在 `backend/src/modules/` 下的同一个目录。
 
-## Debugging Common Issues
+添加新模块的分步说明见[开发指南](../user-guide/development.md)。
 
-### Application Logs
+<a id="debugging-common-issues"></a>
+
+## 常见问题排查
+
+<a id="application-logs"></a>
+
+### 应用日志
 
 === "Docker Compose"
 
@@ -229,59 +273,75 @@ For a step-by-step walkthrough of adding a new module, see the [Development Guid
     docker compose logs -f api
     ```
 
-=== "Local with uv"
+=== "使用 uv 在本地运行"
 
-    Logs are printed to stdout where `fastapi dev` is running.
+    日志输出到运行 `fastapi dev` 的终端标准输出。
 
-### Database Logs
+<a id="database-logs"></a>
+
+### 数据库日志
 
 ```bash
 docker compose logs -f postgres
 ```
 
-### Run Migrations Manually
+<a id="run-migrations-manually"></a>
 
-If you need to re-run migrations:
+### 手动执行迁移
+
+需要重新执行迁移时：
 
 ```bash
 cd backend
 uv run --no-sync alembic upgrade head
 ```
 
-### Reset Everything (Docker)
+<a id="reset-everything-docker"></a>
 
-From the repository root, where `docker-compose.yml` is:
+### 全部重置（Docker）
+
+在 `docker-compose.yml` 所在的仓库根目录执行：
 
 ```bash
 docker compose down -v   # ⚠️ wipes the database volume
 docker compose up
 ```
 
-## Next Steps
+<a id="next-steps"></a>
 
-You've verified your install and tested the main features. Now:
+## 后续步骤
 
-### Essential Reading
+已经验证安装并测试主要功能，接下来可以阅读：
 
-1. **[Project Structure](../user-guide/project-structure.md)** - How the code is organized
-2. **[Database Guide](../user-guide/database/index.md)** - Models, schemas, CRUD
-3. **[Authentication](../user-guide/authentication/index.md)** - Sessions, OAuth, API keys
+<a id="essential-reading"></a>
 
-### Advanced Features
+### 基础阅读
 
-1. **[Caching](../user-guide/caching/index.md)** - Redis-backed cache
-2. **[Background Tasks](../user-guide/background-tasks/index.md)** - Async jobs with Taskiq
-3. **[Rate Limiting](../user-guide/rate-limiting/index.md)** - Per-tier rate limits
+1. **[项目结构](../user-guide/project-structure.md)**：代码组织方式。
+2. **[数据库指南](../user-guide/database/index.md)**：模型、Schema、CRUD。
+3. **[身份认证](../user-guide/authentication/index.md)**：会话、OAuth、API 密钥。
 
-### Development Workflow
+<a id="advanced-features"></a>
 
-1. **[Development Guide](../user-guide/development.md)** - Extend the boilerplate
-2. **[Testing](../user-guide/testing.md)** - Test your features
-3. **[Production](../user-guide/production.md)** - Deploy
+### 高级功能
 
-## Getting Help
+1. **[缓存](../user-guide/caching/index.md)**：基于 Redis 的缓存。
+2. **[后台任务](../user-guide/background-tasks/index.md)**：基于 Taskiq 的异步任务。
+3. **[限流](../user-guide/rate-limiting/index.md)**：按用户等级限流。
 
-- **Check the logs** for error messages
-- **Verify your `backend/.env`** has the right values
-- **Search [GitHub Issues](https://github.com/benavlabs/fastapi-boilerplate/issues)** for similar problems
-- **Open a [new issue](https://github.com/benavlabs/fastapi-boilerplate/issues/new)** with details
+<a id="development-workflow"></a>
+
+### 开发流程
+
+1. **[开发指南](../user-guide/development.md)**：扩展模板。
+2. **[测试](../user-guide/testing.md)**：测试自己的功能。
+3. **[生产环境](../user-guide/production.md)**：部署。
+
+<a id="getting-help"></a>
+
+## 获取帮助
+
+- **检查日志**中的错误信息。
+- **确认 `backend/.env`** 中的配置值正确。
+- **搜索 [GitHub Issues](https://github.com/benavlabs/fastapi-boilerplate/issues)**，查找类似问题。
+- **创建[新 Issue](https://github.com/benavlabs/fastapi-boilerplate/issues/new)**，提供详细信息。

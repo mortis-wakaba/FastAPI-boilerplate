@@ -1,41 +1,40 @@
-# Database Migrations
+<a id="database-migrations"></a>
 
-Schema changes are managed with [Alembic](https://alembic.sqlalchemy.org/). This guide covers the day-to-day workflow plus the production safety net the boilerplate adds on top.
+# 数据库迁移
 
-## Two Modes: Auto-Create vs Migrations
+结构变更使用 [Alembic](https://alembic.sqlalchemy.org/) 管理。本指南介绍日常流程，以及模板提供的生产环境保护措施。
 
-The boilerplate supports both. They are **alternatives**, not complements:
+<a id="two-modes-auto-create-vs-migrations"></a>
 
-### `CREATE_TABLES_ON_STARTUP=true` — auto-create
+## 两种模式：自动建表与迁移
 
-The app calls `Base.metadata.create_all` on startup, creating any missing tables from the current models.
+模板同时支持两者，但应**二选一**，而非混用。
 
-| Use when | Don't use when |
-|----------|----------------|
-| Local dev with a throwaway database | You need version-controlled schema changes |
-| Tests with an ephemeral testcontainer | Multiple developers share a database |
-| Quick prototyping | You're deploying to staging/production |
+<a id="create_tables_on_startuptrue-auto-create"></a>
+<a id="create_tables_on_startuptrue--auto-create"></a>
 
-Driven by the `CREATE_TABLES_ON_STARTUP` env var, which defaults to on when `ENVIRONMENT` is
-`local` or `development` and off everywhere else. Setting it to `true` with
-`ENVIRONMENT=production` is refused at startup by the production security validator. The
-factory honors it via `create_application(create_tables_on_startup=...)`.
+### `CREATE_TABLES_ON_STARTUP=true`：自动建表
 
-### Alembic migrations
+启动时调用 `Base.metadata.create_all`，按当前模型创建缺失表。
 
-Tracked, reviewable, reversible schema changes — what you want for anything beyond a local sandbox. Leave `CREATE_TABLES_ON_STARTUP` off — its default outside local and development, and what production insists on — and run migrations explicitly.
+| 适用场景 | 不适用场景 |
+|----------|------------|
+| 使用一次性数据库的本地开发 | 需要版本控制的结构变更 |
+| 临时 testcontainer 测试 | 多个开发者共用数据库 |
+| 快速原型 | 预发布或生产部署 |
 
-!!! note "Generate your own baseline, once you've chosen your features"
-    `backend/migrations/versions/` ships empty on purpose: the schema a project needs depends on the
-    features it keeps, so there is no revision that fits every project. Remove the features you don't
-    want ([Composable Features](../composable-features.md)), then generate the baseline for what's
-    left.
+由环境变量 `CREATE_TABLES_ON_STARTUP` 控制，`ENVIRONMENT` 为 `local` 或 `development` 时默认开启，其他环境默认关闭。生产安全校验器拒绝在 `production` 设置为 `true`。应用工厂通过 `create_application(create_tables_on_startup=...)` 应用配置。
 
-    **Generate it against a database with nothing in it.** Autogenerate writes the difference
-    between the models and the database it connects to, so pointing it at a database that already
-    has the schema — a dev stack, which `CREATE_TABLES_ON_STARTUP` built with `create_all` — writes
-    a revision whose `upgrade()` is `pass`. Make a throwaway database and name it on the command
-    line:
+<a id="alembic-migrations"></a>
+
+### Alembic 迁移
+
+提供可跟踪、可审查、可回滚的结构变更，适合本地试验之外的场景。保持 `CREATE_TABLES_ON_STARTUP` 关闭，这是 local / development 之外的默认值，也是生产环境的要求，然后显式执行迁移。
+
+!!! note "选定功能后生成自己的初始迁移"
+    `backend/migrations/versions/` 有意保持为空。项目结构取决于保留的功能，没有适合所有项目的迁移。先移除不需要的功能（见[可组合功能](../composable-features.md)），再为保留部分生成基线。
+
+    **必须连接空数据库生成。** 自动生成比较模型与所连接数据库的差异。如果连接已由 `CREATE_TABLES_ON_STARTUP` 和 `create_all` 建好表的开发数据库，会生成 `upgrade()` 只有 `pass` 的迁移。创建一次性数据库，并在命令中指定：
 
     ```bash
     # from the repository root, with the local stack up
@@ -48,85 +47,55 @@ Tracked, reviewable, reversible schema changes — what you want for anything be
     cd .. && docker compose exec postgres dropdb -U postgres baseline_tmp
     ```
 
-    `POSTGRES_USER` and `POSTGRES_PASSWORD` come from your `.env`; only the server, the port and the
-    database name are overridden here. Use the port the stack publishes if it isn't 5432
-    (`docker compose port postgres 5432`).
+    `POSTGRES_USER` 和 `POSTGRES_PASSWORD` 来自 `.env`，这里仅覆盖服务器、端口和数据库名。若发布端口不是 5432，使用 `docker compose port postgres 5432` 查询。
 
-    `POSTGRES_SERVER` matters as much as the database name: `.env.example` ships it as `postgres`,
-    the compose service, which doesn't resolve from your shell — the command dies with
-    `socket.gaierror`. Either pass `localhost`, as above, or run the command in a container on the
-    compose network with your `backend/migrations` mounted into it, so the revision lands in your
-    working tree rather than inside a container that is about to be removed.
+    `POSTGRES_SERVER` 同样重要：`.env.example` 默认使用 Compose 服务名 `postgres`，宿主机 Shell 无法解析，会触发 `socket.gaierror`。可像上面一样指定 `localhost`，或在 Compose 网络的容器中运行，并将 `backend/migrations` 挂载进去，让迁移文件写入工作区而非临时容器。
 
-    `env.py` imports the models the project still carries, so the baseline holds exactly those
-    tables — a project without tiers gets no `tiers` table. Review the file, check that `upgrade()`
-    really creates them, and commit it: from then on it's the first revision every environment runs.
-    Then apply it with `alembic upgrade head` against the database you serve, or
-    [stamp it](#applying-a-baseline-to-a-database-that-already-has-tables) where that database
-    already has the tables.
+    `env.py` 导入项目保留的模型，因此基线只包含这些表；移除 tiers 的项目不会生成 `tiers` 表。审查文件，确认 `upgrade()` 确实建表后提交。它将成为每个环境执行的首个迁移。对实际服务数据库执行 `alembic upgrade head`；已经有表时则[标记基线](#applying-a-baseline-to-a-database-that-already-has-tables)。
 
-    Once you rely on migrations, keep `CREATE_TABLES_ON_STARTUP` off (its default outside local and
-    development) so the app doesn't create tables behind Alembic's back. The models use a naming
-    convention for constraints and indexes (`Base.metadata` in
-    `src/infrastructure/database/session.py`), so autogenerated names stay stable across
-    regenerations.
+    使用迁移后保持 `CREATE_TABLES_ON_STARTUP` 关闭，避免应用绕过 Alembic 建表。模型采用约束和索引命名约定，见 `src/infrastructure/database/session.py` 的 `Base.metadata`，确保重新生成时名称稳定。
 
-!!! warning "Addresses stored before they were canonical"
-    `User` declares `ix_user_email_lower`, a unique index over `lower(email)`, so the database keeps
-    one account per address whatever case it was written in. A database written by an older version
-    can hold `Foo@x.com` and `foo@x.com` at once, and creating the index on it fails. Run
-    `uv run --no-sync python scripts/canonicalize_emails.py` from `backend/` first, or
-    `docker compose exec api python -m scripts.canonicalize_emails` in the container: it rewrites
-    the stored addresses into the canonical form and adds the index, or names the colliding
-    addresses and changes nothing.
+!!! warning "统一格式之前存储的邮箱"
+    `User` 在 `lower(email)` 上声明唯一索引 `ix_user_email_lower`，保证忽略大小写后每个邮箱只有一个账户。旧数据库可能同时存在 `Foo@x.com` 和 `foo@x.com`，导致创建索引失败。先在 `backend/` 执行 `uv run --no-sync python scripts/canonicalize_emails.py`，或在容器中执行 `docker compose exec api python -m scripts.canonicalize_emails`。脚本统一地址格式并添加索引；存在冲突时列出地址且不修改数据。
 
-!!! warning "Avatar URLs stored before the column had a length"
-    `User.profile_image_url` is `String(2048)`, so the panel and a seeding script are held to the
-    length a caller is. The column had no length before, and the revision that adds one fails on a
-    database holding a longer value. Find them first:
+!!! warning "列长度限制之前存储的头像 URL"
+    `User.profile_image_url` 是 `String(2048)`，管理后台和初始数据脚本与客户端受到相同长度限制。旧列没有长度限制，已有超长值会使新增限制的迁移失败。先查找：
 
     ```sql
     SELECT id FROM "user" WHERE length(profile_image_url) > 2048;
     ```
 
-    Those rows hold a URL nothing can serve; shorten them, or put them back to the default
-    (`https://profileimageurl.com`), before applying the revision.
+    这些 URL 无法正常提供服务。应用迁移前缩短它们，或恢复默认值 `https://profileimageurl.com`。
 
-!!! warning "Two rate-limit rules for one path"
-    `RateLimit` declares `uq_rate_limits_tier_path`, a unique index over `(tier_id, path)` for the
-    rows a soft delete has not taken out, so a tier limits a path with one rule. A database written
-    by an older version can hold two, and creating the index on it fails. Find them first:
+!!! warning "同一路径存在两条限流规则"
+    `RateLimit` 在未软删除行的 `(tier_id, path)` 上声明唯一索引 `uq_rate_limits_tier_path`，使每个等级的每条路径只有一条规则。旧数据库可能存在两条，导致索引创建失败。先查找：
 
     ```sql
     SELECT tier_id, path, count(*) FROM rate_limits
     WHERE is_deleted = false GROUP BY tier_id, path HAVING count(*) > 1;
     ```
 
-    Keep the rule each tier should apply to the path and delete the rest. Until then the limit a
-    caller gets is whichever row the lookup reads first.
+    为每个等级和路径保留应生效的规则，删除其余规则。在此之前，调用者实际受到哪条限制取决于查询先读到哪行。
 
-!!! warning "Existing databases"
-    Databases created before the naming convention was added keep PostgreSQL's default constraint names (`user_pkey`, `user_tier_id_fkey`, `tiers_name_key`). The first revision autogenerated against such a database drops and recreates the unique constraints under the new names and drops the duplicate `ix_api_keys_key_prefix`, `ix_key_usage_endpoint` and `ix_key_usage_status_code` indexes — review it before applying. Alembic doesn't compare primary and foreign key names, so rename those yourself before any migration refers to them by name:
+!!! warning "已有数据库"
+    命名约定引入之前的数据库使用 PostgreSQL 默认约束名，如 `user_pkey`、`user_tier_id_fkey`、`tiers_name_key`。首次自动迁移会用新名称删除并重建唯一约束，同时删除重复索引 `ix_api_keys_key_prefix`、`ix_key_usage_endpoint`、`ix_key_usage_status_code`，应用前需审查。Alembic 不比较主键和外键名称，因此在后续迁移按名称引用前，先手动重命名：
 
     ```sql
     ALTER TABLE "user" RENAME CONSTRAINT user_pkey TO pk_user;
     ALTER TABLE "user" RENAME CONSTRAINT user_tier_id_fkey TO fk_user_tier_id_tiers;
     ```
 
-### Applying a baseline to a database that already has tables
+<a id="applying-a-baseline-to-a-database-that-already-has-tables"></a>
 
-A database an older release built with `CREATE_TABLES_ON_STARTUP`, or a dev database you want to
-keep, already holds the tables the baseline creates. Applying the baseline to it fails on the first
-one:
+### 对已有表的数据库应用基线
+
+旧版本通过 `CREATE_TABLES_ON_STARTUP` 建立的数据库，或希望保留的开发数据库，已经有基线要创建的表，直接应用会在首张表失败：
 
 ```text
 asyncpg.exceptions.DuplicateTableError: relation "roles" already exists
 ```
 
-The baseline describes a schema that database already has, so tell alembic that one revision is
-already there rather than running it. **Stamp the baseline's own revision id, not `head`:** `head`
-marks every revision applied, including the ones after the baseline, so the changes they carry are
-skipped and never run.
+基线描述的结构已经存在，应告诉 Alembic 该迁移已应用，而非重新执行。**标记基线自身的 revision ID，不要标记 `head`**：`head` 会把基线之后的迁移也标记为已执行，导致这些变更永远跳过。
 
 ```bash
 cd backend
@@ -136,70 +105,59 @@ uv run --no-sync alembic upgrade head           # runs every revision after the 
 uv run --no-sync alembic check                  # does the database match the models?
 ```
 
-`alembic history` lists revisions newest first, so the last line is the baseline; the id is also the
-first part of the file name in `migrations/versions/`. `stamp` writes that id into `alembic_version`
-and executes nothing, so the rows are untouched.
+`alembic history` 按从新到旧列出迁移，最后一行是基线。ID 也在 `migrations/versions/` 的文件名前缀中。`stamp` 只将 ID 写入 `alembic_version`，不执行迁移、不修改业务记录。
 
-`alembic check` is what tells you whether stamping was honest, and it runs **after** the upgrade:
-it works by autogenerating, so a database with a revision still pending makes it refuse with
-`Target database is not up to date.` rather than report anything. On the day a project first adopts
-migrations the baseline is the only revision, so there is nothing to upgrade and stamp then check is
-the same sequence.
+`alembic check` 可验证标记后的数据库状态，应在升级**之后**运行。它通过自动生成比较差异，如果还有待执行迁移，会报 `Target database is not up to date.`，而不是报告结构差异。首次采用迁移时如果只有基线，无需升级，标记后检查即可。
 
-It diffs the models against the live database and exits non-zero listing what differs — it compares
-the *models*, not the revision history, so it answers "does this database hold today's schema"
-rather than "was the stamp right". A database an older release built with `create_all` usually does
-differ from a baseline generated from today's models, and `check` names each difference as an
-operation:
+它比较当前模型与实际数据库，不比较迁移历史，发现差异时列出操作并以非零退出码结束。因此回答的是“数据库是否具有当前结构”，而非“标记是否正确”。旧版本通过 `create_all` 建立的数据库通常与当前模型生成的基线有差异，`check` 会逐项列出：
 
 ```text
 ERROR [alembic.util.messaging] New upgrade operations detected:
     [('add_column', None, 'user', Column('token_version', Integer(), nullable=False))]
 ```
 
-Fix those on that database by hand, with the `ALTER TABLE`s they describe. A revision that added
-them would be wrong: every database built from the baseline already has them, so that revision
-would fail there. The alternative, if there are many, is to generate the baseline from the release
-that built the database and carry later revisions for what changed since — then the history
-describes the path those databases actually took.
+应按提示手动执行 `ALTER TABLE` 修复该数据库。不要为此新增迁移，因为从基线新建的数据库已经有这些结构，再执行会失败。差异很多时，可改用创建旧数据库的版本生成基线，再通过后续迁移表达此后的变更，使历史对应这些数据库实际经历的路径。
 
-**The order, for a deployment moving off auto-created tables:**
+**从自动建表切换到迁移的部署顺序：**
 
-1. The two repairs, which rewrite rows the newer code reads differently. From `backend/` on the
-   host:
+1. 运行两个数据修复，处理新版代码读取方式不同的旧数据。宿主机在 `backend/` 执行：
 
     ```bash
     uv run --no-sync python scripts/canonicalize_emails.py
     uv run --no-sync python scripts/cleanup_api_key_json.py
     ```
 
-    Or in the container, where the working directory is `/app/src` and the path form finds nothing:
+    或在容器内执行；容器工作目录是 `/app/src`，直接使用脚本路径会找不到：
 
     ```bash
     docker compose exec api python -m scripts.canonicalize_emails
     docker compose exec api python -m scripts.cleanup_api_key_json
     ```
-2. Generate the baseline against an empty database, review it, commit it (above).
-3. `alembic stamp <baseline revision>` on each database that already has the tables.
-4. Apply every later revision the normal way, `alembic upgrade head`, then `alembic check` to see
-   what that database is still missing against today's models, and fix those by hand.
-5. Turn `CREATE_TABLES_ON_STARTUP` off, which is its default outside local and development, so
-   nothing creates tables beside alembic again. `python -m scripts.setup_initial_data` honours it:
-   with the setting off it seeds rows and creates no tables, so run it after step 4.
 
-## Configuration
+2. 对空数据库生成基线，审查并提交，见上文。
+3. 对已有表的每个数据库执行 `alembic stamp <baseline revision>`。
+4. 正常执行后续迁移 `alembic upgrade head`，再用 `alembic check` 查找与当前模型仍存在的差异，并手动修复。
+5. 关闭 `CREATE_TABLES_ON_STARTUP`，避免 Alembic 之外再次建表。`python -m scripts.setup_initial_data` 遵循此设置，关闭时只填充数据而不建表，因此应在步骤 4 之后运行。
+
+<a id="configuration"></a>
+
+## 配置
+
+<a id="backendalembicini"></a>
 
 ### `backend/alembic.ini`
 
-The shipped config sets:
+随附配置：
 
-- `script_location = %(here)s/migrations` — migration files live in `backend/migrations/`
-- `prepend_sys_path = .` — so `src.*` resolves when running from `backend/`
-- `sqlalchemy.url = driver://user:pass@localhost/dbname` — a placeholder; the real URL is overridden in `env.py`
+- `script_location = %(here)s/migrations`：迁移文件位于 `backend/migrations/`。
+- `prepend_sys_path = .`：从 `backend/` 运行时可解析 `src.*`。
+- `sqlalchemy.url = driver://user:pass@localhost/dbname`：占位值，实际 URL 在 `env.py` 覆盖。
+
+<a id="backendmigrationsenvpy"></a>
 
 ### `backend/migrations/env.py`
 
-The boilerplate's `env.py` does three things you'll want to know about:
+模板的 `env.py` 完成三个关键操作：
 
 ```python
 from src.infrastructure.config.settings import settings
@@ -223,29 +181,35 @@ import_models("src.modules")
 target_metadata = Base.metadata
 ```
 
-The auto-import walks `src.modules` recursively — you don't need to maintain a list of model imports for `--autogenerate` to find new tables. Just create the model file under `modules/<feature>/models.py` and it's discovered. Import errors fail fast rather than being skipped, so a broken model module can't silently produce a migration full of `drop_table` statements.
+自动导入递归遍历 `src.modules`，无需维护模型导入列表。创建 `modules/<feature>/models.py` 即可被 `--autogenerate` 发现。导入错误会立即失败，不会跳过，因此损坏的模型模块不会静默生成大量 `drop_table`。
 
-## Workflow
+<a id="workflow"></a>
 
-All commands run from `backend/`:
+## 工作流
+
+所有命令在 `backend/` 下运行：
 
 ```bash
 cd backend
 ```
 
-### 1. Generate a Migration
+<a id="1-generate-a-migration"></a>
 
-After you change a model:
+### 1. 生成迁移
+
+修改模型后：
 
 ```bash
 uv run --no-sync alembic revision --autogenerate -m "Add user profile fields"
 ```
 
-Alembic compares the current models with the database schema and writes a new file in `backend/migrations/versions/`.
+Alembic 比较当前模型和数据库结构，在 `backend/migrations/versions/` 创建文件。
 
-### 2. Review the Generated Migration
+<a id="2-review-the-generated-migration"></a>
 
-Always read it before applying. Autogenerate isn't perfect — it can miss enum changes, server-side defaults, computed columns, and complex constraint renames. A typical generated file:
+### 2. 审查迁移
+
+应用前始终阅读。自动生成可能遗漏枚举变化、服务端默认值、计算列和复杂约束重命名。典型文件如下：
 
 ```python
 """Add user profile fields
@@ -275,7 +239,9 @@ def downgrade() -> None:
     op.drop_column("user", "bio")
 ```
 
-### 3. Apply
+<a id="3-apply"></a>
+
+### 3. 应用
 
 ```bash
 # All pending migrations
@@ -288,7 +254,9 @@ uv run --no-sync alembic upgrade +2
 uv run --no-sync alembic upgrade abc123def456
 ```
 
-### 4. Inspect
+<a id="4-inspect"></a>
+
+### 4. 检查
 
 ```bash
 uv run --no-sync alembic current      # current revision
@@ -297,7 +265,9 @@ uv run --no-sync alembic heads        # any branched heads
 uv run --no-sync alembic show <rev>   # details about a specific revision
 ```
 
-### 5. Roll Back
+<a id="5-roll-back"></a>
+
+### 5. 回滚
 
 ```bash
 uv run --no-sync alembic downgrade -1                # one step back
@@ -305,13 +275,17 @@ uv run --no-sync alembic downgrade <revision>        # to a specific point
 uv run --no-sync alembic downgrade base              # all the way back
 ```
 
-Test your downgrade in dev — it's the cheapest way to spot a missing `op.drop_index` or similar.
+在开发环境测试 downgrade，是发现遗漏 `op.drop_index` 等操作的低成本方法。
 
-## Common Scenarios
+<a id="common-scenarios"></a>
 
-### Adding a New Model
+## 常见场景
 
-1. **Create the module folder** with the model:
+<a id="adding-a-new-model"></a>
+
+### 添加新模型
+
+1. **创建包含模型的模块目录**：
 
     ```python
     # backend/src/modules/widgets/models.py
@@ -332,15 +306,15 @@ Test your downgrade in dev — it's the cheapest way to spot a missing `op.drop_
         name: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     ```
 
-2. **Register it in `modules/__init__.py`** so other code can import it:
+2. **在 `modules/__init__.py` 注册**，供其他代码导入：
 
     ```python
     from .widgets.models import Widget
     ```
 
-    (The migrations env.py auto-imports `src.modules`, so the new model is picked up regardless — but adding it to `modules/__init__.py` keeps the public API explicit.)
+    迁移 `env.py` 自动导入 `src.modules`，因此无论是否注册都能发现；原文建议显式导入以明确公开 API。
 
-3. **Generate and apply:**
+3. **生成并应用**：
 
     ```bash
     uv run --no-sync alembic revision --autogenerate -m "Add widgets table"
@@ -348,7 +322,9 @@ Test your downgrade in dev — it's the cheapest way to spot a missing `op.drop_
     uv run --no-sync alembic upgrade head
     ```
 
-### Adding a Foreign Key
+<a id="adding-a-foreign-key"></a>
+
+### 添加外键
 
 ```python
 # Add to the model
@@ -360,11 +336,13 @@ class Widget(Base, ...):
 uv run --no-sync alembic revision --autogenerate -m "Add widget.owner_id"
 ```
 
-The generated migration will include the column, the FK constraint, and the index.
+生成的迁移包含列、外键约束和索引。
 
-### Data Migrations
+<a id="data-migrations"></a>
 
-Sometimes a schema change needs a data backfill. Edit the autogenerated upgrade to include it:
+### 数据迁移
+
+结构变更有时需要回填数据，可以编辑自动生成的 upgrade：
 
 ```python
 def upgrade() -> None:
@@ -390,7 +368,9 @@ def upgrade() -> None:
     )
 ```
 
-### Renaming a Column
+<a id="renaming-a-column"></a>
+
+### 重命名列
 
 ```python
 def upgrade() -> None:
@@ -401,9 +381,11 @@ def downgrade() -> None:
     op.alter_column("user", "name", new_column_name="full_name")
 ```
 
-For columns with foreign keys or indexes, autogenerate may produce drop-and-recreate instead of a rename. Edit it to use `alter_column` if you want to preserve data.
+包含外键或索引的列可能被自动生成为删除再创建。需要保留数据时，改为 `alter_column`。
 
-### Dropping a Table
+<a id="dropping-a-table"></a>
+
+### 删除表
 
 ```python
 def upgrade() -> None:
@@ -419,54 +401,67 @@ def downgrade() -> None:
     )
 ```
 
-## Production Migration Strategy
+<a id="production-migration-strategy"></a>
 
-The boilerplate adds a hard guard against accidental production migrations: with `ENVIRONMENT=production`, Alembic refuses to run unless `CONFIRM_PRODUCTION_MIGRATION=yes` is set.
+## 生产迁移策略
+
+模板通过明确确认防止误执行生产迁移。`ENVIRONMENT=production` 时，必须设置 `CONFIRM_PRODUCTION_MIGRATION=yes`，否则 Alembic 拒绝运行。
 
 ```bash
 # Production migration — explicit confirmation required
 ENVIRONMENT=production CONFIRM_PRODUCTION_MIGRATION=yes uv run --no-sync alembic upgrade head
 ```
 
-### Recommended Flow
+<a id="recommended-flow"></a>
 
-1. **Develop and test the migration locally** against a copy of production data
-2. **Deploy code with the new migration files** to staging
-3. **Back up the staging database**:
+### 推荐流程
+
+1. 对生产数据副本在本地**开发并测试迁移**。
+2. **部署包含新迁移文件的代码到预发布环境**。
+3. **备份预发布数据库**：
+
     ```bash
     pg_dump -h staging-db -U user dbname > staging_backup_$(date +%Y%m%d_%H%M%S).sql
     ```
-4. **Apply against staging** and run a smoke test
-5. **Schedule a maintenance window** if the migration is destructive
-6. **Back up production**:
+
+4. **在预发布执行迁移**并进行冒烟测试。
+5. 破坏性迁移应**安排维护窗口**。
+6. **备份生产数据库**：
+
     ```bash
     pg_dump -h prod-db -U user dbname > prod_backup_$(date +%Y%m%d_%H%M%S).sql
     ```
-7. **Apply against production** with the explicit confirmation env var
-8. **Watch logs and metrics** post-migration
 
-### Docker Migration Job
+7. 带明确确认变量**执行生产迁移**。
+8. 迁移后**观察日志和指标**。
 
-`bp deploy generate prod` (and `nginx`) writes a `migrate` service for this, built from the `migrate`
-stage in `backend/Dockerfile`, which runs `alembic upgrade head` and exits. It sits behind a compose
-profile, and nothing waits on it:
+<a id="docker-migration-job"></a>
+
+### Docker 迁移作业
+
+`bp deploy generate prod` 和 `nginx` 会生成 `migrate` 服务，从 `backend/Dockerfile` 的 `migrate` 阶段构建，执行 `alembic upgrade head` 后退出。它位于 Compose profile 中，其他服务不等待它：
 
 ```bash
 docker compose --profile migrate run --rm migrate   # then, only if it succeeded:
 docker compose up -d
 ```
 
-Running it first and restarting afterwards is the order that matters: a migration that fails leaves
-the old code serving on the old schema, instead of restarting the API into a schema it can't use.
-Deploying a schema change to a running stack is the same two steps — migrate, then
-`docker compose up -d` to replace the containers that changed.
+先迁移、后重启的顺序很重要：迁移失败时，旧代码继续使用旧结构提供服务，避免 API 重启到不兼容结构。运行中的服务部署结构变更也采用两步：迁移，然后 `docker compose up -d` 替换有变化的容器。
 
-## Best Practices
+<a id="best-practices"></a>
 
-### Always review autogenerated migrations
-Autogenerate misses enum changes, server-side defaults, certain constraint renames, and computed columns.
+## 最佳实践
 
-### Use descriptive messages
+<a id="always-review-autogenerated-migrations"></a>
+
+### 始终审查自动迁移
+
+自动生成可能遗漏枚举、服务端默认值、部分约束重命名和计算列。
+
+<a id="use-descriptive-messages"></a>
+
+### 使用描述清晰的消息
+
 ```bash
 # Good
 uv run --no-sync alembic revision --autogenerate -m "Add user.email_verified"
@@ -475,8 +470,11 @@ uv run --no-sync alembic revision --autogenerate -m "Add user.email_verified"
 uv run --no-sync alembic revision --autogenerate -m "Update user model"
 ```
 
-### Adding a non-nullable column to a populated table
-Do it in three steps in the same migration:
+<a id="adding-a-non-nullable-column-to-a-populated-table"></a>
+
+### 向已有数据的表添加非空列
+
+在同一迁移中分三步：
 
 ```python
 def upgrade() -> None:
@@ -485,38 +483,59 @@ def upgrade() -> None:
     op.alter_column("user", "phone", nullable=False)
 ```
 
-### Test downgrades
+<a id="test-downgrades"></a>
+
+### 测试回滚
 
 ```bash
 uv run --no-sync alembic downgrade -1
 uv run --no-sync alembic upgrade head
 ```
 
-If the down step blows up, fix it before merging the migration.
+回滚失败时，应在合并迁移前修复。
 
-### Don't commit auto-generated `.pyc` files
-The `migrations/versions/` directory should only contain hand-written `.py` files. Alembic does not track `.pyc`.
+<a id="dont-commit-auto-generated-pyc-files"></a>
 
-## Troubleshooting
+### 不提交自动生成的 `.pyc`
 
-### "Target database is not up to date"
-You created a new revision but the database is one or more revisions behind. Run `uv run --no-sync alembic upgrade head` first, then generate the new revision.
+`migrations/versions/` 只保留 `.py` 源文件，Alembic 不跟踪 `.pyc`。
 
-### "Multiple heads detected"
-Two branches both added migrations from the same parent. Merge them:
+<a id="troubleshooting"></a>
+
+## 故障排查
+
+<a id="target-database-is-not-up-to-date"></a>
+
+### “Target database is not up to date”
+
+数据库落后一个或多个迁移。先执行 `uv run --no-sync alembic upgrade head`，再生成新迁移。
+
+<a id="multiple-heads-detected"></a>
+
+### “Multiple heads detected”
+
+两个分支从同一父迁移新增了迁移，需要合并：
 
 ```bash
 uv run --no-sync alembic merge -m "merge heads" <head1> <head2>
 ```
 
-### Autogenerate produces an empty migration
-You haven't actually changed the schema — or `target_metadata` doesn't see your model. Check that the new module is importable from `src.modules` (the auto-importer in `env.py` walks that package).
+<a id="autogenerate-produces-an-empty-migration"></a>
 
-### Migration applies in dev but fails in prod
-Common causes: data the dev DB doesn't have (e.g. an unindexed column with NULLs you tried to make NOT NULL), different Postgres versions, or extensions installed only in one environment. Always test against production-like data.
+### 自动生成空迁移
 
-## Next Steps
+模型没有结构变化，或 `target_metadata` 未发现模型。检查新模块能否从 `src.modules` 导入，`env.py` 的自动导入器会遍历该包。
 
-- **[CRUD Operations](crud.md)** — Use the migrated schema
-- **[API Endpoints](../api/endpoints.md)** — Build endpoints on the new model
-- **[Production](../production.md)** — Production deployment guide
+<a id="migration-applies-in-dev-but-fails-in-prod"></a>
+
+### 开发成功、生产失败
+
+常见原因是数据不同，例如生产列存在 NULL 却要改为 NOT NULL，Postgres 版本不同，或扩展只在某环境安装。始终使用接近生产的数据测试。
+
+<a id="next-steps"></a>
+
+## 后续步骤
+
+- **[CRUD 操作](crud.md)**：使用迁移后的结构。
+- **[API 接口](../api/endpoints.md)**：基于新模型构建接口。
+- **[生产环境](../production.md)**：生产部署指南。

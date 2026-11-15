@@ -1,18 +1,17 @@
-# Rate Limiting
+<a id="rate-limiting"></a>
 
-The boilerplate ships crudauth's rate limiter with per-tier, per-path limits backed by Redis. API
-routes are protected by default; authenticated requests key by user ID and anonymous requests by
-trusted-proxy-aware client IP.
+# 限流
 
-Two features carry this: `ratelimit` is the throttle itself, and `tier_limits` adds the per-tier rules
-and the routes that configure them. A project with neither throttles nothing and answers no `429`; one
-with `ratelimit` alone applies the default limit to every caller. See
-[Composable Features](../composable-features.md).
+模板使用 crudauth 限流器，以 Redis 支持按等级、按路径的限制。API 默认受保护，认证请求按用户 ID，匿名请求按可信代理边界解析的客户端 IP 计数。
 
-!!! tip "Building a full SaaS?"
-    Rate limiting is part of the free foundation. **[FastroAI](https://fastro.ai)** bundles it with Stripe payments, entitlements, transactional email, a frontend, and AI agents - all wired together and production-ready. [Ship your SaaS faster →](https://fastro.ai)
+`ratelimit` 提供节流，`tier_limits` 添加逐等级规则和配置接口。没有这两项则不执行此处 API 节流；仅 ratelimit 时对所有调用者应用默认限制，见[可组合功能](../composable-features.md)。原文称两项都没有时不返回 429，该说法应结合认证自身限流理解。
 
-## What's Built In
+!!! tip "构建完整 SaaS？"
+    限流是免费基础功能，[FastroAI](https://fastro.ai) 将它与支付、权益、邮件、前端和 AI Agent 整合。[更快交付 SaaS →](https://fastro.ai)
+
+<a id="whats-built-in"></a>
+
+## 内置内容
 
 ```text
 backend/src/infrastructure/auth/setup.py
@@ -25,32 +24,32 @@ backend/src/modules/rate_limit/
 └── schemas.py
 ```
 
-The configured crudauth backend is initialized with the auth singleton in the app's lifespan.
+crudauth 后端与认证单例在应用生命周期中初始化。
 
-## How a Request Flows Through It
+<a id="how-a-request-flows-through-it"></a>
 
-1. **The router-level crudauth dependency runs** for each API request.
-2. **`resolve_api_rate_limit`** looks up the user's tier and the row for the matched route template.
-3. **`api_rate_limit_key`** names the budget: the caller (user ID when signed in, client IP otherwise) plus the route template, so every route has its own counter.
-4. **crudauth's limiter** atomically increments the counter for the current window and returns `(count, is_limited)`. Windows are `period` seconds long and aligned to the clock, and each window's key expires on its own.
-5. **If `is_limited`**, raises a 429 with `Retry-After`. Otherwise the limiter attaches `X-RateLimit-Limit` and `X-RateLimit-Remaining` to the response. A request refused afterwards (a 401, a 404, a 422) still counts, and its response carries the headers too.
+## 请求流程
 
-A credential the throttle cannot resolve, such as a junk `X-API-Key` or an expired bearer token,
-is counted against the address rather than the caller: it spends the budget the same request would
-have spent carrying no credential at all. A caller whose credential does resolve keeps a budget of
-their own, so junk sent from their address never spends it.
+1. 每次 API 请求运行路由器级 crudauth 依赖。
+2. `resolve_api_rate_limit` 查用户等级及匹配路由模板的规则。
+3. `api_rate_limit_key` 以调用者和路由模板组合预算，认证用用户 ID，匿名用 IP，各路由独立。
+4. 限流器原子增加当前固定窗口计数，返回 `(count, is_limited)`。窗口长 `period` 秒，按时钟对齐，键自行过期。
+5. 超限抛带 `Retry-After` 的 429，否则附加 `X-RateLimit-Limit`、`X-RateLimit-Remaining`。之后再被 401、404、422 拒绝仍计数，响应也携带头。
 
-The key shape in Redis, ending in the start of the current window:
+无法解析的凭据，如垃圾 `X-API-Key` 或过期 bearer，消耗匿名地址预算。有效凭据有独立调用者预算，不被同地址垃圾请求消耗。
+
+Redis 键末尾为窗口开始时间：
 
 ```text
 crudauth:rl:ratelimit:api:user:{user_id}:{route_template}:{window_start}
 crudauth:rl:ratelimit:api:ip:{client_ip}:{route_template}:{window_start}
 ```
 
-## Custom Enforcement
+<a id="custom-enforcement"></a>
 
-Shipped API routes already use a router-level dependency. For another router, reuse the same
-crudauth API:
+## 自定义执行
+
+现有 API 已在路由器级设置依赖，其他路由可复用：
 
 ```python
 from fastapi import APIRouter, Depends
@@ -64,15 +63,17 @@ router = APIRouter()
 async def create_widget(...): ...
 ```
 
-Or apply it to every route in a router:
+或保护整个路由器：
 
 ```python
 router = APIRouter(dependencies=[Depends(auth.rate_limit("widgets", RateLimit(10, 60), key=KeyBy.USER_OR_IP))])
 ```
 
-That's all that's required. The limiter is enabled with `RATE_LIMITER_ENABLED=true`.
+设置 `RATE_LIMITER_ENABLED=true` 即可启用。
 
-## Configuration
+<a id="configuration"></a>
+
+## 配置
 
 ```env
 # Master toggle for the API limits (the login lockout runs either way)
@@ -96,32 +97,23 @@ RATE_LIMITER_REDIS_CONNECT_TIMEOUT=5
 RATE_LIMITER_REDIS_POOL_SIZE=10
 ```
 
-When `RATE_LIMITER_ENABLED=false`, the router-level dependency is a no-op. This is useful in tests
-and for isolating performance issues. The login lockout still counts on `RATE_LIMITER_BACKEND`, and
-fails closed: with that backend unreachable, logins are refused rather than left unthrottled.
+关闭后 API 依赖不计数，适合测试和性能定位。但登录锁定仍使用 `RATE_LIMITER_BACKEND`，并失败拒绝：后端不可达时不允许无限制登录。
 
-`RATE_LIMITER_BACKEND=database` counts in `crudauth_counters`, a table of this project's own
-database, so several workers share one count with no Redis to run. It matters most for the login
-lockout: with `memory`, each of N workers counts failures separately and an attacker gets N times
-the attempts. Expired counters are deleted as the store writes (about as many rows as the writes
-that created them), so nothing accumulates. Selecting it adds that table and `crudauth_store` to the
-schema — one migration, or `CREATE_TABLES_ON_STARTUP` in development.
+`RATE_LIMITER_BACKEND=database` 使用项目数据库的 `crudauth_counters` 共享计数，无需 Redis。尤其适用于登录锁定：memory 的 N 个 Worker 分别计数，使攻击者得到 N 倍机会。数据库后端写入时删除过期计数，清理量大致对应创建量，避免累积。选择该后端会增加 `crudauth_counters`、`crudauth_store`，需迁移或开发自动建表。
 
-Every rate-limited request is a database write, not only a login: the API limits count there too.
-Under heavy API traffic prefer Redis, and keep `database` for the deployments whose reason to exist
-is running without one.
+所有受限 API 请求都会写数据库，不仅登录。高流量优先 Redis，database 适合明确希望不部署 Redis 的环境。
 
-## User-Tier vs IP-Based Limits
+<a id="user-tier-vs-ip-based-limits"></a>
 
-`api_rate_limit_key` uses the request principal when authentication is present and falls back to
-the client IP using `TRUSTED_PROXY_HOPS`, adding the route template either way. The resolver checks that
-template against the user's tier and falls back to the configured default.
+## 用户等级与 IP 限制
 
-## Path Matching
+有认证时以 principal 为键，否则用 `TRUSTED_PROXY_HOPS` 解析的 IP，再加入路由模板。解析器查询用户等级对应模板，未找到使用默认值。
 
-Rate-limit rows are matched against the **route template** the request matched, as the router
-declares it, including the API prefix. The samples below use the default `/api`; a project that
-set `API_PREFIX=/service` stores its rows as `/service/v1/...`:
+<a id="path-matching"></a>
+
+## 路径匹配
+
+规则匹配路由声明的**模板**，包含 API 前缀。默认 `/api`，设置 `API_PREFIX=/service` 则存 `/service/v1/...`：
 
 ```text
 /api/v1/users/               # the listing route, trailing slash included
@@ -130,8 +122,7 @@ set `API_PREFIX=/service` stores its rows as `/service/v1/...`:
 /api/v1/files/{path:path}    # a wildcard segment
 ```
 
-The trailing slash is part of the template: the listing route is declared as `/api/v1/users/`, so a
-row for `/api/v1/users` never matches it. Read the templates off the app rather than guessing:
+尾斜杠也是模板一部分，`/api/v1/users` 不匹配 `/api/v1/users/`。应从应用读取：
 
 ```python
 from fastapi.routing import APIRoute
@@ -140,18 +131,15 @@ from src.interfaces.main import app
 print(sorted(route.path for route in app.routes if isinstance(route, APIRoute)))
 ```
 
-A row that names a concrete path such as `/api/v1/users/42` never matches, because the request
-resolves to `/api/v1/users/{username}`. One counter per caller per route also means a caller can't
-spend another route's budget by hitting one hot resource.
+具体路径如 `/api/v1/users/42` 不匹配，因为解析模板是 `/api/v1/users/{username}`。各调用者每路由独立，一个热点资源不会消耗另一条路由预算。
 
-The `path` column accepts a leading slash and segments of literal text, one `{name}` placeholder
-with an optional Starlette converter (`str`, `path`, `int`, `float`, `uuid`), or literal text around
-one placeholder (`/items/{id}.json`, `/v{version}/items`). Unbalanced braces, an unknown converter,
-two placeholders in one segment, and anything with trailing whitespace or a newline are refused.
+`path` 要求前导斜杠。每段可为字面文本、一个 `{name}`（可带 str / path / int / float / uuid 转换器），或围绕一个占位符的文本，如 `/items/{id}.json`、`/v{version}/items`。括号不平衡、未知转换器、同段两个占位符、尾空白或换行均拒绝。
 
-## Managing Rate-Limit Rules
+<a id="managing-rate-limit-rules"></a>
 
-The `RateLimit` model:
+## 管理规则
+
+`RateLimit` 模型：
 
 ```python
 class RateLimit(Base, TimestampMixin, SoftDeleteMixin):
@@ -175,39 +163,31 @@ class RateLimit(Base, TimestampMixin, SoftDeleteMixin):
     )
 ```
 
-`limit` and `period` are `Integer` columns, so both must be within `1..2147483647`: a create or a
-`PATCH` outside that answers `422`. A row seeded through SQL or `crud_rate_limits` stays inside the
-same range, since Postgres refuses the statement otherwise.
+`limit`、`period` 是 Integer，范围 `1..2147483647`，创建和 PATCH 越界返回 `422`。直接 SQL / CRUD 写入同样受 Postgres 范围限制。
 
-A tier limits a path with one rule. The index refuses a second row for the same `tier_id` and
-`path`, because the limit a caller got was whichever row the lookup read first: two rows saying
-`10` and `1000` for `/api/v1/users/` made the limit a toss-up. A `PATCH` that moves a rule onto a
-path the tier already limits answers `409`, and so does `RateLimitService.create`. Soft-deleted
-rows are outside the index, so a path whose rule was deleted is free to configure again.
+每等级每路径只有一条未软删除规则，唯一索引拒绝第二条，避免 10 和 1000 两条规则产生随机生效。PATCH 移到已有限制路径、或 `RateLimitService.create` 重复创建，均 409。软删除行不参与索引，可重新配置。
 
-A rule names its tier, and the tier is read before the row is written: one deleted in between
-leaves the foreign key to refuse the rule, which answers `404` for the tier rather than a
-conflict with another rule. Which constraint refused a row is read off the driver's own error
-(`modules/common/collisions.py`), and out of the quoted name in the message only where the
-driver gives none.
+写入前先读取等级；期间被删除则外键拒绝，返回等级 404，而非错误报告规则冲突。拒绝约束从驱动错误读取，驱动未提供时才从错误消息中引用的名称提取，见 `modules/common/collisions.py`。
 
-### What the API exposes
+<a id="what-the-api-exposes"></a>
 
-| Method | Path                         | Auth        | Notes                                    |
-|--------|------------------------------|-------------|------------------------------------------|
-| GET    | `/api/v1/rate-limits/`       | Superuser   | Paginated list of all rate-limit rules   |
-| GET    | `/api/v1/rate-limits/{name}` | Superuser   | Get a rule by name                       |
-| PATCH  | `/api/v1/rate-limits/{name}` | Superuser   | Update an existing rule                  |
-| DELETE | `/api/v1/rate-limits/{name}` | Superuser   | Delete a rule                            |
+### API 提供的操作
 
-There's **no POST endpoint** for creating rate-limit rules. To seed initial rules, you have three
-options. Whichever you use, a seeded `path` is the route template with the API prefix in it,
-exactly as [Path Matching](#path-matching) describes: the rows below are for the default
-`API_PREFIX=/api`, and a project that moved the API seeds `/service/v1/widgets/` instead.
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| GET | `/api/v1/rate-limits/` | 超级用户 | 分页规则列表 |
+| GET | `/api/v1/rate-limits/{name}` | 超级用户 | 按名称查询 |
+| PATCH | `/api/v1/rate-limits/{name}` | 超级用户 | 更新 |
+| DELETE | `/api/v1/rate-limits/{name}` | 超级用户 | 删除 |
 
-### Option 1: SQL / Migration
+**没有 POST 创建接口**。初始化可选以下三种方式，路径必须是含 API 前缀的完整模板，见[路径匹配](#path-matching)。示例默认 `/api`，修改前缀后应存 `/service/v1/widgets/`。
 
-Add an Alembic migration that inserts the rows:
+<a id="option-1-sql-migration"></a>
+<a id="option-1-sql--migration"></a>
+
+### 方式一：SQL / 迁移
+
+通过 Alembic 插入：
 
 ```python
 # alembic/versions/xxxx_seed_rate_limits.py
@@ -220,9 +200,11 @@ def upgrade():
     """)
 ```
 
-### Option 2: Custom Seed Script
+<a id="option-2-custom-seed-script"></a>
 
-Add a one-off in `backend/scripts/`:
+### 方式二：初始化脚本
+
+在 `backend/scripts/` 添加：
 
 ```python
 # backend/scripts/setup_rate_limits.py
@@ -245,90 +227,100 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-Run with `uv run --no-sync python -m scripts.setup_rate_limits` (from `backend/`).
+从 `backend/` 执行 `uv run --no-sync python -m scripts.setup_rate_limits`。
 
-A row whose `path` leaves the prefix out, or spells a concrete path such as `/api/v1/widgets/42`,
-is stored and then never matches anything. Read the templates off the app, as above, rather than
-typing them by hand. A second row for a tier and path that already has a rule is refused by
-`uq_rate_limits_tier_path`, whichever of the three you use.
+缺前缀或具体路径会被存储但不匹配。应读取应用模板而非猜测。三种方式的重复规则均由 `uq_rate_limits_tier_path` 拒绝。
 
-### Option 3: Add a SQLAdmin View
+<a id="option-3-add-a-sqladmin-view"></a>
 
-Mirror `UserAdmin` and `TierAdmin` to add a `RateLimitAdmin` view — see [Admin Panel → Adding Models](../admin-panel/adding-models.md). This gives you a UI for creating, editing, and deleting rules.
+### 方式三：SQLAdmin 视图
 
-## Response Headers
+参考 UserAdmin / TierAdmin 添加 `RateLimitAdmin`，见[添加模型](../admin-panel/adding-models.md)，即可在 UI 增删改。
 
-Every response to a counted request carries these, errors included:
+<a id="response-headers"></a>
 
-| Header                  | Meaning                                          |
-|-------------------------|--------------------------------------------------|
-| `X-RateLimit-Limit`     | The configured limit for this caller × path      |
-| `X-RateLimit-Remaining` | How many requests are left in the current window |
+## 响应头
 
-A 429 also carries `Retry-After`, the seconds until the window resets. A request refused after
-the limiter counted it - a 401 from authentication, a 404, a 422 - still reports the budget it
-spent, through crudauth's `RateLimitHeadersMiddleware`, which the app factory installs.
+计数请求的所有响应，包括错误：
 
-A per-action budget - the five password checks an hour an account gets for changing its password or
-its address - reports itself per route. On `POST /api/v1/auth/change-password`, crudauth's own guard
-counts the request, and every response carries that budget: a wrong password answers `401` with
-`X-RateLimit-Limit: 5` and the checks left in the window. On the email change, `PATCH
-/api/v1/users/{username}`, the budget is counted beside the path's allowance: the `200` and the `403`
-for a wrong password report the path's limit, and only the `429` reports `5`, `0` and `Retry-After`.
+| 头 | 含义 |
+|----|------|
+| `X-RateLimit-Limit` | 调用者与路径的配置限制 |
+| `X-RateLimit-Remaining` | 当前窗口剩余请求数 |
 
-These are standard-ish (formatted like the GitHub / Stripe convention, not RFC 6585). Frontends can read them to surface graceful "you're approaching your limit" UI.
+429 还携带窗口重置前秒数 `Retry-After`。应用工厂安装 crudauth `RateLimitHeadersMiddleware`，使认证等后续 401 / 404 / 422 也报告已消耗预算。
 
-## Production Considerations
+操作专属预算按路由报告。例如每账户每小时五次改密检查，`POST /api/v1/auth/change-password` 由 crudauth 自身保护，密码错误也返回 `X-RateLimit-Limit: 5` 及剩余。原文另以 `PATCH /api/v1/users/{username}` 描述邮箱变更，称它同时计路径预算，200 / 错误密码 403 报路径额度，仅 429 报 5、0 和 Retry-After。
 
-### Pool sizing
+> 译注：邮箱确认流程在用户管理章节使用 `/api/v1/auth/email/change-request`，本节相关描述可能来自旧版。
 
-`RATE_LIMITER_REDIS_POOL_SIZE=10` is enough for typical workloads. If you're seeing `redis.exceptions.ConnectionError` under load, it usually means pool exhaustion — raise the pool size or check upstream connection-leak issues first.
+这些头沿用类似 GitHub / Stripe 的惯例，原文说明并非 RFC 6585 定义格式。前端可据此提示额度即将用尽。
 
-### Backend errors
+<a id="production-considerations"></a>
 
-crudauth's window checks fail open on a Redis outage — requests pass through unrate-limited rather
-than turning a cache blip into 429s for everyone. The login lockout is the exception: it fails
-closed, so a locked-out account can't slip through while Redis is down.
+## 生产考虑
 
-### Window behavior
+<a id="pool-sizing"></a>
 
-The implementation uses a fixed-window counter, with windows aligned to the clock. At the boundary between windows, a user can technically make `2 × limit` requests in a short span. For most use cases this is fine; if you need stricter sliding-window semantics, build that on top of the limiter yourself.
+### 连接池
 
-### Anonymous-user limits
+`RATE_LIMITER_REDIS_POOL_SIZE=10` 通常足够。高负载 `redis.exceptions.ConnectionError` 常是池耗尽，先检查连接泄漏或提高大小。
 
-IP-based rate limits are easy to bypass with NAT / proxies / IPv6 rotation. They're a speed bump, not security. If you're trying to prevent abuse rather than control fair use, you need authentication, captchas, or upstream firewall rules — not just rate limits.
+<a id="backend-errors"></a>
 
-## Troubleshooting
+### 后端故障
 
-### "My limit is not matching"
+窗口限流在 Redis 故障时失败放行，避免临时故障变成所有人 429。登录锁定例外，失败拒绝，已锁账户不能趁故障通过。
 
-- Confirm `RATE_LIMITER_ENABLED=true`
-- Confirm the auth singleton initialized cleanly at startup
-- Confirm the `path` column on the rule is the route template, not a concrete path, including `/api/v1`
+<a id="window-behavior"></a>
 
-### "All requests look anonymous even though users are logged in"
+### 固定窗口
 
-The limiter keys on the resolved principal for authenticated requests. If users appear anonymous,
-the session cookie isn't reaching the app — check `SESSION_BACKEND`, `SESSION_REDIS_DB` and any
-reverse proxy that strips cookies.
+时钟对齐的固定窗口边界附近，短时间可能达到 `2 × limit`。通常可接受，需要严格滑动窗口时自行扩展。
 
-### "The limiter can't reach Redis"
+<a id="anonymous-user-limits"></a>
 
-Window checks fail open, so requests keep flowing while Redis is down (the login lockout fails
-closed). Fix the Redis connection, or take the limiter out of the path entirely with
-`RATE_LIMITER_ENABLED=false`.
+### 匿名限制
 
-## Key Files
+IP 限流可通过代理和 IPv6 轮换绕过，NAT 也会影响公平性。它只增加滥用成本，不能替代认证、验证码或上游防火墙。
 
-| Component             | Location                                                  |
-|-----------------------|-----------------------------------------------------------|
-| Resolver + dependency | `backend/src/infrastructure/auth/setup.py`                |
-| RateLimit model       | `backend/src/modules/rate_limit/models.py`                |
-| Rate-limit routes     | `backend/src/modules/rate_limit/routes.py`                |
-| Settings              | `backend/src/infrastructure/config/settings.py` (`RateLimiterSettings`) |
+<a id="troubleshooting"></a>
 
-## Next Steps
+## 故障排查
 
-- **[Tiers](../authentication/permissions.md#tier-based-authorization)** — Setting up user tiers
-- **[Admin Panel → Adding Models](../admin-panel/adding-models.md)** — Adding a `RateLimitAdmin` view
-- **[Caching → Cache Strategies](../caching/cache-strategies.md)** — Patterns that share the same Redis-as-state mindset
+<a id="my-limit-is-not-matching"></a>
+
+### 规则不匹配
+
+检查开关、认证单例初始化、路径是否包含 `/api/v1` 的路由模板而非具体地址。
+
+<a id="all-requests-look-anonymous-even-though-users-are-logged-in"></a>
+
+### 登录后仍像匿名
+
+检查 Cookie 是否到达应用、`SESSION_BACKEND`、`SESSION_REDIS_DB`，以及代理是否删除 Cookie。
+
+<a id="the-limiter-cant-reach-redis"></a>
+
+### 无法连接 Redis
+
+窗口检查放行，登录拒绝。修复连接，或用 `RATE_LIMITER_ENABLED=false` 去除 API 限流；这不改变登录锁定的后端依赖。
+
+<a id="key-files"></a>
+
+## 关键文件
+
+| 组件 | 位置 |
+|------|------|
+| 解析器和依赖 | `backend/src/infrastructure/auth/setup.py` |
+| 模型 | `backend/src/modules/rate_limit/models.py` |
+| 路由 | `backend/src/modules/rate_limit/routes.py` |
+| 配置 | `backend/src/infrastructure/config/settings.py` 的 `RateLimiterSettings` |
+
+<a id="next-steps"></a>
+
+## 后续步骤
+
+- **[等级](../authentication/permissions.md#tier-based-authorization)**：设置用户等级。
+- **[添加后台模型](../admin-panel/adding-models.md)**：规则管理 UI。
+- **[缓存策略](../caching/cache-strategies.md)**：Redis 状态模式。

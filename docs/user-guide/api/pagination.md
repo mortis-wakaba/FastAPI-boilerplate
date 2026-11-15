@@ -1,8 +1,12 @@
-# API Pagination
+<a id="api-pagination"></a>
 
-The boilerplate uses FastCRUD's `PaginatedListResponse[T]` and `paginated_response()` helpers for paginated list endpoints. This page documents the pattern.
+# API 分页
 
-## Quick Start
+模板通过 FastCRUD 的 `PaginatedListResponse[T]` 和 `paginated_response()` 构建分页列表，本页说明对应模式。
+
+<a id="quick-start"></a>
+
+## 快速开始
 
 ```python
 from typing import Any
@@ -30,11 +34,13 @@ async def get_users(
     return paginated_response(crud_data=result, page=page, items_per_page=items_per_page)
 ```
 
-`compute_offset(page, items_per_page)` is the documented helper — use it instead of computing `(page - 1) * items_per_page` by hand.
+使用文档提供的 `compute_offset(page, items_per_page)`，无需手动计算 `(page - 1) * items_per_page`。
 
-## Response Shape
+<a id="response-shape"></a>
 
-`paginated_response()` returns:
+## 响应结构
+
+`paginated_response()` 返回：
 
 ```json
 {
@@ -48,11 +54,13 @@ async def get_users(
 }
 ```
 
-`has_more` is `True` when there are still rows past the current page (`page * items_per_page < total_count`). The boilerplate doesn't return `total_pages` — frontends can derive it as `ceil(total_count / items_per_page)` if they need it.
+当前页后仍有记录，即 `page * items_per_page < total_count` 时，`has_more` 为 `True`。模板不返回 `total_pages`，前端需要时可计算 `ceil(total_count / items_per_page)`。
 
-## Where the Service Does the Work
+<a id="where-the-service-does-the-work"></a>
 
-The route stays thin. The actual `get_multi` call lives in the service:
+## 服务层执行查询
+
+路由保持轻量，实际 `get_multi` 调用放在服务中：
 
 ```python
 # modules/user/service.py
@@ -75,11 +83,13 @@ class UserService:
         )
 ```
 
-`return_total_count=True` is what makes the response include `total_count` (and therefore makes `has_more` accurate).
+`return_total_count=True` 使响应包含 `total_count`，并保证 `has_more` 准确。
 
-## Filtering
+<a id="filtering"></a>
 
-Add filter parameters to the route, pass them to the service:
+## 过滤
+
+在路由添加过滤参数并传入服务：
 
 ```python
 @router.get("/", response_model=PaginatedListResponse[UserRead])
@@ -101,7 +111,7 @@ async def list_users(
     return paginated_response(crud_data=result, page=page, items_per_page=items_per_page)
 ```
 
-In the service, build the `crud_users.get_multi` filters:
+在服务中构造 `crud_users.get_multi` 的过滤条件：
 
 ```python
 async def get_paginated(
@@ -128,11 +138,13 @@ async def get_paginated(
     )
 ```
 
-FastCRUD's `__icontains` / `__contains` / `__gt` / `__in` operators avoid raw SQL. See [CRUD Operations](../database/crud.md) for the full list.
+FastCRUD 的 `__icontains`、`__contains`、`__gt`、`__in` 等操作符可避免编写原始 SQL，见 [CRUD 操作](../database/crud.md)。
 
-## Sorting
+<a id="sorting"></a>
 
-FastCRUD accepts `sort_columns` and `sort_orders`:
+## 排序
+
+FastCRUD 接受 `sort_columns` 和 `sort_orders`：
 
 ```python
 result = await crud_users.get_multi(
@@ -145,14 +157,14 @@ result = await crud_users.get_multi(
 )
 ```
 
-For multiple sort keys, pass lists:
+多字段排序传入列表：
 
 ```python
 sort_columns=["tier_id", "created_at"],
 sort_orders=["asc", "desc"],
 ```
 
-Expose this from the route as a query parameter:
+通过路由查询参数对外提供：
 
 ```python
 from fastapi import Query
@@ -170,12 +182,13 @@ async def list_users(
     ...
 ```
 
-The `pattern` constraint stops clients from passing arbitrary column names that could leak fields you didn't mean to sort by.
+`pattern` 限制客户端传入任意列名，避免暴露不应允许排序的字段。
 
-## Validation
+<a id="validation"></a>
 
-Every listing takes its bounds from one place, `modules/common/pagination.py`, so no route can
-forget them:
+## 校验
+
+所有列表的边界统一定义于 `modules/common/pagination.py`，避免路由遗漏：
 
 ```python
 MAX_ITEMS_PER_PAGE = 100
@@ -185,7 +198,7 @@ PageDep = Annotated[int, Query(ge=1, le=MAX_PAGE, description="Page number")]
 ItemsPerPageDep = Annotated[int, Query(ge=1, le=MAX_ITEMS_PER_PAGE, description=f"Items per page (max {MAX_ITEMS_PER_PAGE})")]
 ```
 
-A route declares the two parameters with those aliases and nothing else:
+路由只需使用两个参数别名：
 
 ```python
 @router.get("/", response_model=PaginatedListResponse[UserRead])
@@ -198,13 +211,13 @@ async def list_users(
     ...
 ```
 
-`items_per_page` above 100 answers `422`, on every listing including the API-key usage history,
-which used to allow 1000. `page` above `2147483647` answers `422` as well, rather than reaching the
-database with an offset it can't hold.
+所有列表的 `items_per_page` 超过 100 都返回 `422`，包括以前允许 1000 的 API 密钥用量历史。`page` 超过 `2147483647` 也返回 `422`，避免数据库收到超出范围的偏移量。
 
-## Real Endpoint: List Users
+<a id="real-endpoint-list-users"></a>
 
-From `modules/user/routes.py`:
+## 实际接口：用户列表
+
+来自 `modules/user/routes.py`：
 
 ```python
 from ...infrastructure.auth.authorization import require_permissions
@@ -236,11 +249,13 @@ async def get_users(
     return paginated_response(crud_data=users_data, page=page, items_per_page=items_per_page)
 ```
 
-The endpoint is gated on the `user.read` permission, which a role grants — not on the superuser flag. Superusers always pass. See [Permissions](../authentication/permissions.md#role-based-permissions).
+接口要求角色授予的 `user.read` 权限，而非直接检查超级用户标记。超级用户始终通过，见[权限](../authentication/permissions.md#role-based-permissions)。
 
-## Real Endpoint: API Key Usage History
+<a id="real-endpoint-api-key-usage-history"></a>
 
-From `modules/api_keys/routes.py` — the same pattern, and the same bounds:
+## 实际接口：API 密钥用量历史
+
+来自 `modules/api_keys/routes.py`，使用相同模式和边界：
 
 ```python
 @router.get(
@@ -265,9 +280,11 @@ async def get_key_usage(
     return paginated_response(crud_data=result, page=page, items_per_page=items_per_page)
 ```
 
-## Simple List Without Pagination
+<a id="simple-list-without-pagination"></a>
 
-If you genuinely don't need pagination (e.g. an admin endpoint that returns a tiny enumerable like all tiers), call `get_multi` once and return the `data` list directly:
+## 不分页的简单列表
+
+确实不需要分页时，例如管理接口返回数量很小的等级集合，调用一次 `get_multi` 并直接返回 `data`：
 
 ```python
 @router.get("/all", response_model=list[TierRead])
@@ -279,17 +296,23 @@ async def list_all_tiers(
     return result["data"]
 ```
 
-Even here, set a generous-but-finite `limit` — never an unbounded query.
+即便如此，也应设置较大但有限的 `limit`，不执行无上限查询。
 
-## Performance Tips
+<a id="performance-tips"></a>
 
-### Cap `items_per_page`
+## 性能建议
 
-Already covered, but worth repeating: an `Annotated[int, Query(ge=1, le=100)]` is your safety net.
+<a id="cap-items_per_page"></a>
 
-### Use `schema_to_select`
+### 限制 `items_per_page`
 
-Only return the columns the response model needs. For a `UserRead` schema, this avoids fetching `hashed_password`:
+使用 `Annotated[int, Query(ge=1, le=100)]` 设置边界。
+
+<a id="use-schema_to_select"></a>
+
+### 使用 `schema_to_select`
+
+只读取响应模型需要的列，`UserRead` 可避免读取 `hashed_password`：
 
 ```python
 return await crud_users.get_multi(
@@ -301,23 +324,29 @@ return await crud_users.get_multi(
 )
 ```
 
-### Index columns you sort or filter on
+<a id="index-columns-you-sort-or-filter-on"></a>
 
-When you add new sort/filter parameters that target a column without an index, generate an Alembic migration that adds one:
+### 为排序或过滤列建索引
+
+新增排序或过滤参数对应的列没有索引时，通过 Alembic 迁移添加：
 
 ```python
 def upgrade() -> None:
     op.create_index("ix_user_created_at", "user", ["created_at"])
 ```
 
-The User model already indexes `username`, `email`, `tier_id`, `google_id`, and `github_id` for this reason.
+因此用户模型已为 `username`、`email`、`tier_id`、`google_id`、`github_id` 建索引。
 
-### Beware of large offsets
+<a id="beware-of-large-offsets"></a>
 
-`OFFSET 100000` still has Postgres scan and discard 100,000 rows. For very large datasets, consider keyset pagination (filtering by `created_at < cursor`) instead of page-based pagination. FastCRUD's `__lt` / `__gt` operators support this directly.
+### 留意大偏移量
 
-## What's Next
+`OFFSET 100000` 仍需 Postgres 扫描并丢弃十万行。超大数据集可采用键集分页，如 `created_at < cursor`，替代页码分页。FastCRUD 的 `__lt` / `__gt` 可直接支持。
 
-- **[CRUD Operations](../database/crud.md)** — Filter/sort/offset/limit semantics
-- **[Schemas](../database/schemas.md)** — How `*Read` schemas pair with `schema_to_select`
-- **[Authentication](../authentication/index.md)** — Gating list endpoints behind login, a permission, or admin
+<a id="whats-next"></a>
+
+## 后续步骤
+
+- **[CRUD 操作](../database/crud.md)**：过滤、排序、offset 和 limit 语义。
+- **[Schema](../database/schemas.md)**：`*Read` 与 `schema_to_select` 的配合。
+- **[身份认证](../authentication/index.md)**：为列表设置登录、权限或管理员要求。

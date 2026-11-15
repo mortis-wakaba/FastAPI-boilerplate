@@ -1,21 +1,27 @@
-# Caching
+<a id="caching"></a>
 
-The boilerplate ships a flexible caching system supporting **Redis or Memcached** server-side, plus configurable client-side cache headers. Same decorator and provider API regardless of the backend.
+# 缓存
 
-Caching is the `cache` feature. A project without it has no `cached` decorator to import, no cache settings and no cache entry in the readiness report: see [Composable Features](../composable-features.md).
+模板支持 **Redis 或 Memcached** 服务端缓存，以及可配置的客户端缓存头；后端共用相同装饰器和 provider API。
 
-!!! tip "Building a full SaaS?"
-    Caching is part of the free foundation. **[FastroAI](https://fastro.ai)** bundles it with Stripe payments, entitlements, transactional email, a frontend, and AI agents - all wired together and production-ready. [Ship your SaaS faster →](https://fastro.ai)
+缓存属于 `cache` 功能，移除后没有可导入的 `cached`、缓存配置或就绪报告中的缓存项，见[可组合功能](../composable-features.md)。
 
-## Overview
+!!! tip "构建完整 SaaS？"
+    缓存属于免费基础功能。[FastroAI](https://fastro.ai) 将其与 Stripe 支付、权益、邮件、前端和 AI Agent 整合。[更快交付 SaaS →](https://fastro.ai)
 
-Three layers, used together as needed:
+<a id="overview"></a>
 
-- **`@cache` decorator** — Caches GET endpoints, automatically invalidates on any mutation (POST/PUT/PATCH/DELETE)
-- **Provider API** — Direct cache operations (`get`, `set`, `delete`, etc.) for non-route code
-- **Client-side cache headers** — `Cache-Control` headers added by middleware for browser caching
+## 概览
 
-## Quick Example
+三层可按需组合：
+
+- **`@cache`**：缓存 GET，POST / PUT / PATCH / DELETE 后自动失效。
+- **Provider API**：供非路由代码直接 get、set、delete。
+- **客户端缓存头**：中间件添加 `Cache-Control`。
+
+<a id="quick-example"></a>
+
+## 快速示例
 
 ```python
 from typing import Annotated, Any
@@ -41,9 +47,11 @@ async def get_widget(
     return await widget_service.get_by_id(widget_id, db)
 ```
 
-The decorator caches the result for 600 seconds. PUT/PATCH/DELETE on the same `widget_id` invalidate the cache automatically. The first parameter must be `request: Request` — the decorator inspects the HTTP method.
+结果缓存 600 秒，相同 `widget_id` 的更新和删除自动失效。首个参数必须为 `request: Request`，装饰器据此判断方法。
 
-## Architecture
+<a id="architecture"></a>
+
+## 架构
 
 ```text
 HTTP Request
@@ -57,19 +65,23 @@ service / FastCRUD                (your code)
 PostgreSQL
 ```
 
-When the cache hits, the handler doesn't run at all — the cached value is returned directly. When it misses (or for mutations), the handler runs and the cache is updated or invalidated as configured.
+命中时直接返回缓存、不执行处理器；未命中或发生写操作时执行处理器，再按配置缓存或失效。
 
-## What's Included
+<a id="whats-included"></a>
 
-| Component | Purpose | Location |
-|-----------|---------|----------|
-| `@cache` decorator | Endpoint-level caching with auto-invalidation | `infrastructure/cache/decorator.py` |
-| Provider API | Direct cache ops (`get`, `set`, `delete`, …) | `infrastructure/cache/provider.py` |
-| Redis backend | Pattern matching, persistence, rich types | `infrastructure/cache/backends/redis.py` |
-| Memcached backend | Lightweight, key/value only | `infrastructure/cache/backends/memcached.py` |
-| `ClientCacheMiddleware` | Adds `Cache-Control` headers | `infrastructure/middleware.py` |
+## 组件
 
-## Configuration
+| 组件 | 用途 | 位置 |
+|------|------|------|
+| `@cache` | 接口缓存与自动失效 | `infrastructure/cache/decorator.py` |
+| Provider API | 直接缓存操作 | `infrastructure/cache/provider.py` |
+| Redis 后端 | 模式匹配、持久化、丰富类型 | `infrastructure/cache/backends/redis.py` |
+| Memcached 后端 | 轻量键值存储 | `infrastructure/cache/backends/memcached.py` |
+| `ClientCacheMiddleware` | 添加缓存头 | `infrastructure/middleware.py` |
+
+<a id="configuration"></a>
+
+## 配置
 
 ```env
 CACHE_ENABLED=true
@@ -92,47 +104,49 @@ CLIENT_CACHE_ENABLED=true
 CLIENT_CACHE_MAX_AGE=60        # seconds
 ```
 
-When `CACHE_ENABLED=false`, the decorator becomes a no-op — useful in tests.
+`CACHE_ENABLED=false` 时装饰器不执行缓存，适合测试。完整参考见[环境变量](../configuration/environment-variables.md#cache)。
 
-See [Environment Variables](../configuration/environment-variables.md#cache) for the full reference.
+<a id="picking-a-backend"></a>
 
-## Picking a Backend
+## 选择后端
 
-Both backends work with the decorator and provider. They have different strengths:
+| 能力 | Redis | Memcached |
+|------|-------|-----------|
+| `delete_pattern` 模式删除 | 支持 | 不支持，抛 `PatternMatchingNotSupportedError` |
+| 可选 AOF / RDB 持久化 | 支持 | 不支持 |
+| 列表、集合、哈希等结构 | 支持 | 仅键值 |
+| 内存效率 | 良好 | 优秀 |
 
-| Feature | Redis | Memcached |
-|---------|-------|-----------|
-| Pattern-based deletion (`delete_pattern`) | Yes | No (raises `PatternMatchingNotSupportedError`) |
-| Optional persistence (AOF / RDB) | Yes | No |
-| Rich data structures (lists, sets, hashes) | Yes | Key/value only |
-| Memory efficiency | Good | Excellent |
+需要模式失效、重启保留，或已为会话、限流、Taskiq 部署 Redis 时选 **Redis**。已有 Memcached 或偏好简单键值语义时选 **Memcached**。模板默认统一使用 Redis，同时承担会话和限流后端。
 
-**Pick Redis** if you need pattern-based invalidation (`pattern_to_invalidate_extra` on the decorator, or `delete_pattern` directly), persistence across restarts, or you're already running Redis for sessions / rate limits / Taskiq.
+<a id="graceful-degradation"></a>
 
-**Pick Memcached** if you have an existing Memcached deployment or you specifically want simpler key/value semantics.
+## 降级
 
-The boilerplate's defaults run Redis everywhere because it doubles as the session and rate-limit backend.
+缓存不可用时，装饰器捕获错误并执行原处理器，接口仍可用但更慢。缓存可从数据库重建，因此有意采用失败放行，避免缓存故障拖垮 API。
 
-## Graceful Degradation
+<a id="sub-pages"></a>
 
-If the cache backend becomes unavailable, the decorator catches the error and falls through to the underlying handler. Your endpoints still work, just slower. This fail-open behavior is intentional — cached data is reproducible from the database, so cache failures shouldn't take the API down.
+## 子页面
 
-## Sub-pages
+1. **[Redis 缓存](redis-cache.md)**：装饰器、provider 和失效模式。
+2. **[客户端缓存](client-cache.md)**：缓存头与中间件。
+3. **[缓存策略](cache-strategies.md)**：键名、关联失效与旁路缓存。
 
-1. **[Redis Cache](redis-cache.md)** — Decorator usage, provider API, invalidation patterns
-2. **[Client Cache](client-cache.md)** — `Cache-Control` headers and the client-cache middleware
-3. **[Cache Strategies](cache-strategies.md)** — Patterns for cache key naming, related-key invalidation, and cache-aside flows
+<a id="key-files"></a>
 
-## Key Files
+## 关键文件
 
-| Component | Location |
-|-----------|----------|
-| Decorator | `backend/src/infrastructure/cache/decorator.py` |
-| Provider API | `backend/src/infrastructure/cache/provider.py` |
-| Backends | `backend/src/infrastructure/cache/backends/` |
-| Settings | `backend/src/infrastructure/config/settings.py` (`CacheSettings`) |
-| Client-cache middleware | `backend/src/infrastructure/middleware.py` |
+| 组件 | 位置 |
+|------|------|
+| 装饰器 | `backend/src/infrastructure/cache/decorator.py` |
+| Provider | `backend/src/infrastructure/cache/provider.py` |
+| 后端 | `backend/src/infrastructure/cache/backends/` |
+| 配置 | `backend/src/infrastructure/config/settings.py` 的 `CacheSettings` |
+| 客户端中间件 | `backend/src/infrastructure/middleware.py` |
 
-## Next Steps
+<a id="next-steps"></a>
 
-Start with [Redis Cache](redis-cache.md) for the decorator and provider patterns, then look at [Cache Strategies](cache-strategies.md) for invalidation tactics.
+## 后续步骤
+
+先读 [Redis 缓存](redis-cache.md)，再读[缓存策略](cache-strategies.md)中的失效方法。

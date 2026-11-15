@@ -1,15 +1,21 @@
-# Configuration
+<a id="configuration"></a>
 
-Learn how to configure your FastAPI Boilerplate application for different environments. Configuration is driven by environment variables and validated by Python settings classes.
+# 配置
 
-## What You'll Learn
+本章介绍如何为不同环境配置 FastAPI Boilerplate。配置由环境变量驱动，并通过 Python 配置类校验。
 
-- **[Environment Variables](environment-variables.md)** - Configure through `.env` files
-- **[Settings Classes](settings-classes.md)** - Python-based configuration management
-- **[Docker Setup](docker-setup.md)** - Container and service configuration
-- **[Environment-Specific](environment-specific.md)** - Development, staging, and production configs
+<a id="what-youll-learn"></a>
 
-## Quick Start
+## 内容概览
+
+- **[环境变量](environment-variables.md)**：通过 `.env` 文件配置。
+- **[配置类](settings-classes.md)**：基于 Python 的配置管理。
+- **[Docker 配置](docker-setup.md)**：容器和服务配置。
+- **[分环境配置](environment-specific.md)**：开发、预发布和生产环境。
+
+<a id="quick-start"></a>
+
+## 快速开始
 
 ```bash
 cd backend
@@ -17,7 +23,7 @@ cp .env.example .env
 $EDITOR .env
 ```
 
-Essential variables:
+必要变量：
 
 ```env
 # Application
@@ -36,7 +42,9 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=secure_password
 ```
 
-## Configuration Architecture
+<a id="configuration-architecture"></a>
+
+## 配置架构
 
 ```
 Environment Variables (.env file)
@@ -46,9 +54,11 @@ Settings Classes (Pydantic BaseSettings)
 Application Code (via get_settings())
 ```
 
-### Layer 1: Environment Variables
+<a id="layer-1-environment-variables"></a>
 
-Primary configuration through `backend/.env`:
+### 第一层：环境变量
+
+主要通过 `backend/.env` 配置：
 
 ```env
 POSTGRES_USER=myuser
@@ -57,9 +67,11 @@ CACHE_REDIS_HOST=localhost
 SECRET_KEY=your-secret-key
 ```
 
-### Layer 2: Settings Classes
+<a id="layer-2-settings-classes"></a>
 
-Pydantic `BaseSettings` classes in `src/infrastructure/config/settings.py` validate and structure config:
+### 第二层：配置类
+
+`src/infrastructure/config/settings.py` 中的 Pydantic `BaseSettings` 类校验配置并提供结构化访问：
 
 ```python
 class DatabaseSettings(BaseSettings):
@@ -70,11 +82,13 @@ class DatabaseSettings(BaseSettings):
     POSTGRES_DB: str = config("POSTGRES_DB", default="postgres")
 ```
 
-A single composite `Settings` class combines them all.
+最终由一个组合的 `Settings` 类整合。
 
-### Layer 3: Application Use
+<a id="layer-3-application-use"></a>
 
-Pull settings anywhere in the app via `get_settings()`:
+### 第三层：应用使用
+
+应用任意位置都可以通过 `get_settings()` 获取配置：
 
 ```python
 from src.infrastructure.config.settings import get_settings
@@ -83,9 +97,13 @@ settings = get_settings()
 print(settings.DATABASE_URL)
 ```
 
-## Key Configuration Areas
+<a id="key-configuration-areas"></a>
 
-### Application Settings
+## 主要配置领域
+
+<a id="application-settings"></a>
+
+### 应用设置
 
 ```env
 APP_NAME=Your App Name
@@ -94,7 +112,9 @@ ENVIRONMENT=development  # development | staging | production | local
 DEBUG=false
 ```
 
-### Database
+<a id="database"></a>
+
+### 数据库
 
 ```env
 POSTGRES_USER=your_user
@@ -105,7 +125,10 @@ POSTGRES_DB=your_database
 CREATE_TABLES_ON_STARTUP=true   # the default in local and development
 ```
 
-### Security & Sessions
+<a id="security-sessions"></a>
+<a id="security--sessions"></a>
+
+### 安全与会话
 
 ```env
 SECRET_KEY=your-super-secret-key-here
@@ -117,9 +140,13 @@ CSRF_ENABLED=true
 TRUSTED_PROXY_HOPS=0            # trusted reverse proxies in front of the app
 ```
 
-Login lockout is applied internally by `crudauth` (escalating per-IP / per-identifier; returns `429` with `Retry-After`) — it is not configured via env vars.
+登录锁定由 `crudauth` 内部实现，按 IP 和登录标识逐级加重，返回带 `Retry-After` 的 `429`。本节原文称其不通过环境变量配置。
 
-### Cache (Redis or Memcached)
+> 译注：此处与入门配置指南列出的 `LOGIN_*` 变量不一致，使用时请核对当前代码。
+
+<a id="cache-redis-or-memcached"></a>
+
+### 缓存（Redis 或 Memcached）
 
 ```env
 CACHE_ENABLED=true
@@ -129,7 +156,9 @@ CACHE_REDIS_PORT=6379
 CACHE_REDIS_DB=0
 ```
 
-### Background Tasks (Taskiq)
+<a id="background-tasks-taskiq"></a>
+
+### 后台任务（Taskiq）
 
 ```env
 TASKIQ_BROKER_TYPE=redis      # or "rabbitmq"
@@ -138,7 +167,9 @@ TASKIQ_REDIS_PORT=6379
 TASKIQ_REDIS_DB=3
 ```
 
-### Rate Limiting
+<a id="rate-limiting"></a>
+
+### 限流
 
 ```env
 RATE_LIMITER_ENABLED=true
@@ -148,9 +179,11 @@ DEFAULT_RATE_LIMIT_LIMIT=100
 DEFAULT_RATE_LIMIT_PERIOD=60
 ```
 
-### Admin User (Initial Setup)
+<a id="admin-user-initial-setup"></a>
 
-Read by `python -m scripts.setup_initial_data` on first run:
+### 管理员用户（初始化）
+
+首次运行 `python -m scripts.setup_initial_data` 时读取：
 
 ```env
 ADMIN_NAME=Admin User
@@ -159,9 +192,13 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=secure_password
 ```
 
-## Environment-Specific Configurations
+<a id="environment-specific-configurations"></a>
 
-### Development
+## 分环境配置
+
+<a id="development"></a>
+
+### 开发环境
 
 ```env
 ENVIRONMENT=development
@@ -172,7 +209,9 @@ TASKIQ_REDIS_HOST=localhost
 RATE_LIMITER_REDIS_HOST=localhost
 ```
 
-### Staging
+<a id="staging"></a>
+
+### 预发布环境
 
 ```env
 ENVIRONMENT=staging
@@ -182,7 +221,9 @@ CACHE_REDIS_HOST=staging-redis.example.com
 SESSION_SECURE_COOKIES=true
 ```
 
-### Production
+<a id="production"></a>
+
+### 生产环境
 
 ```env
 ENVIRONMENT=production
@@ -193,9 +234,11 @@ PRODUCTION_SECURITY_VALIDATION_ENABLED=true
 ENABLE_DOCS_IN_PRODUCTION=false
 ```
 
-## Docker Configuration
+<a id="docker-configuration"></a>
 
-Docker Compose loads variables from `.env` automatically. With Compose, services reach each other by service name:
+## Docker 配置
+
+Docker Compose 自动加载 `.env` 中的变量。Compose 服务之间通过服务名访问：
 
 ```env
 POSTGRES_SERVER=postgres
@@ -204,7 +247,9 @@ RATE_LIMITER_REDIS_HOST=redis
 TASKIQ_REDIS_HOST=redis
 ```
 
-### Service Overview
+<a id="service-overview"></a>
+
+### 服务概览
 
 ```yaml
 services:
@@ -213,20 +258,24 @@ services:
   redis:  # Cache, rate limiting, sessions, taskiq broker
 ```
 
-To run a Taskiq worker, add a worker service to your Compose file with the command `taskiq worker src.infrastructure.taskiq.worker:default_broker`.
+运行 Taskiq Worker 时，在 Compose 文件中添加 Worker 服务，使用命令 `taskiq worker src.infrastructure.taskiq.worker:default_broker`。
 
-## Common Configuration Patterns
+<a id="common-configuration-patterns"></a>
 
-### Feature Toggles
+## 常见配置模式
 
-The boilerplate already exposes toggles like `CACHE_ENABLED`, `RATE_LIMITER_ENABLED`, `ADMIN_ENABLED`, and `CSRF_ENABLED`. You can add your own in a settings class:
+<a id="feature-toggles"></a>
+
+### 功能开关
+
+模板已有 `CACHE_ENABLED`、`RATE_LIMITER_ENABLED`、`ADMIN_ENABLED` 和 `CSRF_ENABLED` 等开关。也可以在配置类中添加自己的开关：
 
 ```python
 class FeatureSettings(BaseSettings):
     ENABLE_ANALYTICS: bool = config("ENABLE_ANALYTICS", default=False, cast=bool)
 ```
 
-Then use it:
+然后使用：
 
 ```python
 from src.infrastructure.config.settings import get_settings
@@ -235,7 +284,9 @@ if get_settings().ENABLE_ANALYTICS:
     track_event(...)
 ```
 
-### Environment Detection
+<a id="environment-detection"></a>
+
+### 环境检测
 
 ```python
 from src.infrastructure.config.settings import EnvironmentOption, get_settings
@@ -244,36 +295,51 @@ if get_settings().ENVIRONMENT == EnvironmentOption.PRODUCTION:
     ...
 ```
 
-### Generate Secret Key
+<a id="generate-secret-key"></a>
+
+### 生成密钥
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(64))"
 ```
 
-## Best Practices
+<a id="best-practices"></a>
 
-### Security
-- Never commit `.env` to version control
-- Use a unique strong `SECRET_KEY` per environment
-- Disable debug mode in production
-- Set `ENVIRONMENT=production` to enable the security validator
-- Restrict `CORS_ORIGINS` to specific domains
+## 最佳实践
 
-### Performance
-- Tune `POSTGRES_POOL_SIZE` and `POSTGRES_MAX_OVERFLOW` for your workload
-- Use separate Redis databases for cache (`CACHE_REDIS_DB=0`), rate limiting (`RATE_LIMITER_REDIS_DB=1`), and taskiq (`TASKIQ_REDIS_DB=3`)
-- Set sensible `SESSION_TIMEOUT_MINUTES` and `MAX_SESSIONS_PER_USER`
+<a id="security"></a>
 
-### Maintenance
-- Document custom environment variables in `.env.example`
-- Add validation in settings classes (Pydantic types catch most issues)
-- Test configurations in staging before production
+### 安全
 
-## Getting Started
+- 不要把 `.env` 提交到版本控制。
+- 每个环境使用独立、足够强的 `SECRET_KEY`。
+- 生产环境禁用调试模式。
+- 设置 `ENVIRONMENT=production`，启用安全校验器。
+- 将 `CORS_ORIGINS` 限定为具体域名。
 
-1. **[Environment Variables](environment-variables.md)** - Complete reference of every variable
-2. **[Settings Classes](settings-classes.md)** - How config is organized in Python
-3. **[Docker Setup](docker-setup.md)** - Compose files and overrides
-4. **[Environment-Specific](environment-specific.md)** - Per-environment best practices
+<a id="performance"></a>
 
-The boilerplate ships with sensible defaults — only override what you need.
+### 性能
+
+- 根据负载调整 `POSTGRES_POOL_SIZE` 和 `POSTGRES_MAX_OVERFLOW`。
+- 缓存、限流和 Taskiq 分别使用独立 Redis DB，默认是 `CACHE_REDIS_DB=0`、`RATE_LIMITER_REDIS_DB=1`、`TASKIQ_REDIS_DB=3`。
+- 合理设置 `SESSION_TIMEOUT_MINUTES` 和 `MAX_SESSIONS_PER_USER`。
+
+<a id="maintenance"></a>
+
+### 维护
+
+- 在 `.env.example` 记录自定义变量。
+- 在配置类中添加校验，Pydantic 类型可以捕获多数问题。
+- 生产部署前先在预发布环境验证配置。
+
+<a id="getting-started"></a>
+
+## 阅读顺序
+
+1. **[环境变量](environment-variables.md)**：全部变量参考。
+2. **[配置类](settings-classes.md)**：Python 配置组织方式。
+3. **[Docker 配置](docker-setup.md)**：Compose 文件和覆盖配置。
+4. **[分环境配置](environment-specific.md)**：各环境的最佳实践。
+
+模板提供合理的默认值，只覆盖需要调整的选项即可。

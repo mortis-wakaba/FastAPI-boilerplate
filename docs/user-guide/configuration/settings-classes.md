@@ -1,8 +1,12 @@
-# Settings Classes
+<a id="settings-classes"></a>
 
-Settings live in `backend/src/infrastructure/config/settings.py` and are organized as Pydantic `BaseSettings` classes — each class groups related variables, and a single `Settings` class composes them all. Defaults come from `backend/.env` via Starlette's `Config()` loader.
+# 配置类
 
-## Settings Architecture
+配置位于 `backend/src/infrastructure/config/settings.py`，使用 Pydantic `BaseSettings` 类组织。每个类组合相关变量，再由一个 `Settings` 类统一组合。默认值通过 Starlette 的 `Config()` 加载器从 `backend/.env` 获取。
+
+<a id="settings-architecture"></a>
+
+## 配置架构
 
 ```python
 # src/infrastructure/config/settings.py
@@ -41,7 +45,7 @@ def get_settings() -> Settings:
     return settings
 ```
 
-Anywhere in the app:
+在应用任意位置使用：
 
 ```python
 from src.infrastructure.config.settings import get_settings
@@ -50,32 +54,36 @@ settings = get_settings()
 print(settings.APP_NAME)
 ```
 
-## Built-in Settings Groups
+<a id="built-in-settings-groups"></a>
 
-The actual classes that ship with the boilerplate, all in `src/infrastructure/config/settings.py`:
+## 内置配置分组
 
-| Class | Covers |
-|-------|--------|
-| `EnvironmentSettings` | `ENVIRONMENT` (production/staging/development/local) |
-| `DatabaseSettings` | All `POSTGRES_*` vars + `DATABASE_URL` computed property |
-| `CacheSettings` | `CACHE_*` (Redis + Memcached + client-side) |
-| `RateLimiterSettings` | `RATE_LIMITER_*` (Redis + Memcached + defaults) |
+模板提供的配置类位于 `src/infrastructure/config/settings.py`：
+
+| 类 | 内容 |
+|----|------|
+| `EnvironmentSettings` | `ENVIRONMENT`，可选 production / staging / development / local |
+| `DatabaseSettings` | 所有 `POSTGRES_*` 变量和 `DATABASE_URL` 计算属性 |
+| `CacheSettings` | `CACHE_*`，包括 Redis、Memcached 和客户端缓存 |
+| `RateLimiterSettings` | `RATE_LIMITER_*`，包括 Redis、Memcached 和默认值 |
 | `CORSSettings` | `CORS_*` |
 | `CompressionSettings` | `GZIP_*` |
-| `APIDocSettings` | `ENABLE_DOCS_IN_PRODUCTION`, `OPENAPI_PREFIX`, `DOCS_URL`, `REDOC_URL`, `OPENAPI_URL`, and the `API_*` document metadata (title, summary, description, version, terms, contact, licence, tags) |
-| `AuthSettings` | `SECRET_KEY`, `SESSION_*`, `CSRF_ENABLED`, `TRUSTED_PROXY_HOPS`, `OAUTH_*` |
+| `APIDocSettings` | `ENABLE_DOCS_IN_PRODUCTION`、`OPENAPI_PREFIX`、`DOCS_URL`、`REDOC_URL`、`OPENAPI_URL`，以及 `API_*` 文档元数据：标题、摘要、描述、版本、服务条款、联系人、许可证和标签 |
+| `AuthSettings` | `SECRET_KEY`、`SESSION_*`、`CSRF_ENABLED`、`TRUSTED_PROXY_HOPS`、`OAUTH_*` |
 | `APISettings` | `API_PREFIX` |
-| `AppSettings` | `APP_NAME`, `APP_DESCRIPTION`, `VERSION`, `DEBUG` |
-| `AdminSettings` | `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `DEFAULT_TIER_NAME` |
+| `AppSettings` | `APP_NAME`、`APP_DESCRIPTION`、`VERSION`、`DEBUG` |
+| `AdminSettings` | `ADMIN_NAME`、`ADMIN_EMAIL`、`ADMIN_USERNAME`、`ADMIN_PASSWORD`、`DEFAULT_TIER_NAME` |
 | `SQLAdminSettings` | `ADMIN_ENABLED` |
-| `SecuritySettings` | `SECRET_KEY`, `PRODUCTION_SECURITY_VALIDATION_ENABLED`, `SECURITY_HEADERS_ENABLED` |
-| `LoggingSettings` | All `LOG_*` |
-| `TaskiqSettings` | `TASKIQ_*` (Redis + RabbitMQ + worker tuning) |
+| `SecuritySettings` | `SECRET_KEY`、`PRODUCTION_SECURITY_VALIDATION_ENABLED`、`SECURITY_HEADERS_ENABLED` |
+| `LoggingSettings` | 所有 `LOG_*` 变量 |
+| `TaskiqSettings` | `TASKIQ_*`，包括 Redis、RabbitMQ 和 Worker 调优 |
 | `APIKeySettings` | `KEY_USAGE_RETENTION_DAYS` |
 
-## Anatomy of a Settings Group
+<a id="anatomy-of-a-settings-group"></a>
 
-A typical class:
+## 配置分组的结构
+
+典型配置类：
 
 ```python
 class DatabaseSettings(BaseSettings):
@@ -108,15 +116,19 @@ class DatabaseSettings(BaseSettings):
         )
 ```
 
-Key points:
+要点：
 
-- Each field uses `config("VAR_NAME", default=..., cast=...)`. The `Config()` instance is initialized with `backend/.env` so values are loaded at import time.
-- For typed conversion, pass `cast=int`, `cast=bool`, etc.
-- Use `@property` for derived values (like `DATABASE_URL`) — no need for `@computed_field` since callers always go through `get_settings()`.
+- 字段使用 `config("VAR_NAME", default=..., cast=...)`。`Config()` 以 `backend/.env` 初始化，在导入时加载值。
+- 使用 `cast=int`、`cast=bool` 等进行类型转换。
+- 派生值（如 `DATABASE_URL`）使用 `@property`。调用者通过 `get_settings()` 访问，无需 `@computed_field`。
 
-## Adding Custom Settings
+<a id="adding-custom-settings"></a>
 
-### Basic Custom Group
+## 添加自定义配置
+
+<a id="basic-custom-group"></a>
+
+### 基本分组
 
 ```python
 # backend/src/infrastructure/config/settings.py
@@ -144,9 +156,12 @@ class Settings(
     pass
 ```
 
-Then add the matching variables to `backend/.env.example` so they're discoverable.
+在 `backend/.env.example` 中添加对应变量，便于发现和查阅。
 
-### Computed / Derived Values
+<a id="computed-derived-values"></a>
+<a id="computed--derived-values"></a>
+
+### 计算值与派生值
 
 ```python
 class StorageSettings(BaseSettings):
@@ -168,9 +183,11 @@ class StorageSettings(BaseSettings):
         return False
 ```
 
-### Validation
+<a id="validation"></a>
 
-For richer validation, switch a field's value to use Pydantic validators:
+### 校验
+
+需要更复杂的校验时，使用 Pydantic 校验器：
 
 ```python
 from pydantic import field_validator, model_validator
@@ -196,11 +213,13 @@ class StorageSettings(BaseSettings):
         return self
 ```
 
-Validators run when `Settings()` is instantiated at startup, so misconfiguration fails fast.
+校验器在启动阶段实例化 `Settings()` 时运行，因此错误配置会尽早失败。
 
-## Enums for Constrained Values
+<a id="enums-for-constrained-values"></a>
 
-For options with a fixed set of valid values, define a `StrEnum` in `src/infrastructure/config/enums.py` and use it as the default:
+## 使用枚举约束取值
+
+对于取值集合固定的选项，在 `src/infrastructure/config/enums.py` 定义 `StrEnum` 并用作默认值：
 
 ```python
 # enums.py
@@ -220,11 +239,13 @@ class StorageSettings(BaseSettings):
     STORAGE_BACKEND: str = config("STORAGE_BACKEND", default=StorageBackend.LOCAL.value)
 ```
 
-The boilerplate already does this for `CacheBackend`, `LogFormat`, `LogLevel`, `SessionBackend`, `TaskiqBrokerType`, and `EnvironmentOption`.
+模板已对 `CacheBackend`、`LogFormat`、`LogLevel`、`SessionBackend`、`TaskiqBrokerType` 和 `EnvironmentOption` 使用此方式。
 
-## Removing Built-in Groups
+<a id="removing-built-in-groups"></a>
 
-If you don't use a feature, drop the corresponding class from the `Settings` MRO:
+## 移除内置分组
+
+不使用某功能时，从 `Settings` 的 MRO 中移除对应类：
 
 ```python
 class Settings(
@@ -242,15 +263,17 @@ class Settings(
     pass
 ```
 
-You'll also want to:
+同时需要：
 
-- Remove the now-orphan code that depends on those settings (e.g. cache decorator, taskiq broker, rate limiter middleware)
-- Drop the corresponding env vars from `.env.example`
-- Disable startup of those subsystems in `infrastructure/app_factory.py`
+- 移除依赖这些配置的代码，如缓存装饰器、Taskiq 消息代理和限流中间件。
+- 从 `.env.example` 删除对应变量。
+- 在 `infrastructure/app_factory.py` 禁止启动这些子系统。
 
-## Testing Settings
+<a id="testing-settings"></a>
 
-The test suite uses fixtures that override settings. The general pattern:
+## 测试配置
+
+测试套件通过 fixture 覆盖配置，常见模式如下：
 
 ```python
 import pytest
@@ -265,7 +288,7 @@ def test_settings(monkeypatch):
     return Settings()
 ```
 
-For one-off overrides without env vars, instantiate the relevant settings class directly with kwargs:
+不使用环境变量的一次性覆盖，可直接传入关键字参数实例化对应配置类：
 
 ```python
 def test_storage_validation():
@@ -273,33 +296,45 @@ def test_storage_validation():
         StorageSettings(MAX_UPLOAD_SIZE_BYTES=200_000_000)
 ```
 
-## Best Practices
+<a id="best-practices"></a>
 
-### Organization
+## 最佳实践
 
-- Group settings by **subsystem** (cache, auth, taskiq), not by environment
-- Keep validation alongside the field it validates
-- Add a one-line docstring per class so its purpose is obvious
-- Mirror group names in `.env.example` section headers
+<a id="organization"></a>
 
-### Security
+### 组织
 
-- Validate `SECRET_KEY` length / strength when `ENVIRONMENT=production` (the boilerplate already does this via the production security validator)
-- Never set a real default for credentials — leave them blank and let the validator complain
-- Use `@property` to derive connection strings rather than embedding them in env vars
+- 按**子系统**（缓存、认证、Taskiq）分组，而非按环境分组。
+- 校验逻辑与字段放在一起。
+- 每个类添加一行 docstring 说明用途。
+- `.env.example` 的小节标题与配置分组对应。
 
-### Performance
+<a id="security"></a>
 
-- The `Settings` instance is created once at import time and shared via `get_settings()` — don't instantiate it per-request
-- Keep validators cheap; they run at startup but they also run if anyone re-instantiates `Settings`
+### 安全
 
-### Testing
+- `ENVIRONMENT=production` 时校验 `SECRET_KEY` 长度和强度，模板的生产安全校验器已实现。
+- 凭据不要设置真实默认值，留空并由校验器报告缺失。
+- 通过 `@property` 派生连接字符串，而非直接嵌入环境变量。
 
-- Use `monkeypatch.setenv(...)` to vary env vars per test
-- Don't reach for the global `settings` in tests when you can pass an instance directly
+<a id="performance"></a>
 
-## See Also
+### 性能
 
-- **[Environment Variables](environment-variables.md)** — Full variable reference
-- **[Docker Setup](docker-setup.md)** — How variables flow into Compose
-- **[Environment-Specific](environment-specific.md)** — Recommended values per environment
+- `Settings` 在导入时创建一次，通过 `get_settings()` 共享，不要每个请求重新实例化。
+- 校验器保持轻量，启动和任何重新实例化时都会执行。
+
+<a id="testing"></a>
+
+### 测试
+
+- 使用 `monkeypatch.setenv(...)` 为每个测试调整环境变量。
+- 可以直接传实例时，避免依赖全局 `settings`。
+
+<a id="see-also"></a>
+
+## 另请参阅
+
+- **[环境变量](environment-variables.md)**：完整变量参考。
+- **[Docker 配置](docker-setup.md)**：变量如何传入 Compose。
+- **[分环境配置](environment-specific.md)**：各环境推荐值。

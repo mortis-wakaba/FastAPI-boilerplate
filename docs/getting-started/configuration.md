@@ -1,23 +1,31 @@
-# Configuration
+<a id="configuration"></a>
 
-This guide covers the essential configuration steps to get your FastAPI application running.
+# 配置指南
 
-## Quick Setup
+本指南介绍启动 FastAPI 应用所需的基本配置。
 
-Copy the example environment file and edit a few values:
+<a id="quick-setup"></a>
+
+## 快速配置
+
+复制环境变量示例文件，并修改其中的配置值：
 
 ```bash
 cd backend
 cp .env.example .env
 ```
 
-The full set of variables lives in `backend/.env.example`. The sections below cover the ones you'll most likely want to change.
+全部变量见 `backend/.env.example`。以下介绍最常需要调整的选项。
 
-## Essential Configuration
+<a id="essential-configuration"></a>
 
-Open `backend/.env` and set these required values.
+## 必要配置
 
-### Application Settings
+打开 `backend/.env`，设置以下必要选项。
+
+<a id="application-settings"></a>
+
+### 应用设置
 
 ```env
 APP_NAME=Your app name here
@@ -28,19 +36,23 @@ API_CONTACT_EMAIL=your@email.com
 API_LICENSE_NAME=The license you picked
 ```
 
-### Environment Type
+<a id="environment-type"></a>
+
+### 环境类型
 
 ```env
 # Options: development, staging, production, local
 ENVIRONMENT=development
 ```
 
-- **development**: API docs at `/docs`, `/redoc`, verbose logging
-- **staging**: Structured logs, file output enabled
-- **production**: JSON logs, security validation, docs gated by `ENABLE_DOCS_IN_PRODUCTION`
-- **local**: Same defaults as development; useful for tests
+- **development**：在 `/docs`、`/redoc` 提供 API 文档，启用详细日志。
+- **staging**：结构化日志，启用日志文件输出。
+- **production**：JSON 日志、安全校验，通过 `ENABLE_DOCS_IN_PRODUCTION` 控制文档开放。
+- **local**：默认设置与 development 相同，适用于测试。
 
-### Database
+<a id="database"></a>
+
+### 数据库
 
 ```env
 POSTGRES_USER=postgres
@@ -51,9 +63,11 @@ POSTGRES_PORT=5432
 CREATE_TABLES_ON_STARTUP=true   # the default in local and development
 ```
 
-### Security
+<a id="security"></a>
 
-Generate a strong `SECRET_KEY`:
+### 安全设置
+
+生成强随机 `SECRET_KEY`：
 
 ```bash
 python -c "import secrets; print(secrets.token_urlsafe(64))"
@@ -66,7 +80,9 @@ SECRET_KEY=your-generated-secret-key-here
 PRODUCTION_SECURITY_VALIDATION_ENABLED=true
 ```
 
-### Sessions
+<a id="sessions"></a>
+
+### 会话
 
 ```env
 SESSION_TIMEOUT_MINUTES=30
@@ -94,9 +110,7 @@ PASSWORD_REQUIRE_DIGIT=true
 PASSWORD_REQUIRE_SPECIAL=true
 ```
 
-Login lockout is applied by `crudauth`, per client IP and per submitted identifier at once, and answers
-`429 Too Many Requests` with a `Retry-After` header. Four settings tune it, passed to crudauth's
-`LockoutConfig` in `infrastructure/auth/setup.py`:
+登录锁定由 `crudauth` 实现，同时按客户端 IP 和提交的登录标识统计失败次数；触发限制时返回 `429 Too Many Requests`，并附带 `Retry-After` 响应头。以下四项配置会在 `infrastructure/auth/setup.py` 中传入 crudauth 的 `LockoutConfig`：
 
 ```env
 LOGIN_MAX_ATTEMPTS=5              # failures allowed inside the window
@@ -105,12 +119,13 @@ LOGIN_LOCKOUT_BASE_SECONDS=300    # first lockout, doubling each round
 LOGIN_LOCKOUT_MAX_SECONDS=3600    # cap on the escalation
 ```
 
-Because both dimensions are counted, an attacker rotating identifiers from one address runs out of
-attempts on the address, and one spread across addresses runs out on the identifier.
+由于同时统计两个维度，从同一地址不断更换登录标识会耗尽该地址的尝试次数；从不同地址尝试同一标识则会耗尽该标识的次数。
 
-### First Admin User
+<a id="first-admin-user"></a>
 
-The `setup_initial_data` script reads these on first run:
+### 首个管理员用户
+
+`setup_initial_data` 脚本首次运行时读取以下配置：
 
 ```env
 ADMIN_NAME=Admin User
@@ -119,13 +134,15 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=Change-Me-Now-1!
 ```
 
-Then run:
+然后运行：
 
 ```bash
 uv run --no-sync python -m scripts.setup_initial_data
 ```
 
-### Cache (Redis or Memcached)
+<a id="cache-redis-or-memcached"></a>
+
+### 缓存（Redis 或 Memcached）
 
 ```env
 CACHE_ENABLED=true
@@ -142,7 +159,9 @@ CACHE_REDIS_DB=0
 CACHE_REDIS_PASSWORD=
 ```
 
-### Rate Limiting
+<a id="rate-limiting"></a>
+
+### 限流
 
 ```env
 RATE_LIMITER_ENABLED=true
@@ -157,11 +176,11 @@ RATE_LIMITER_REDIS_DB=1
 RATE_LIMITER_REDIS_PASSWORD=
 ```
 
-API limits are resolved by `crudauth` per request from the user's tier and path. Authenticated
-requests are keyed by user ID; anonymous requests are keyed by the client IP, honoring
-`TRUSTED_PROXY_HOPS`.
+`crudauth` 根据用户等级和请求路径，为每个请求确定 API 限流规则。已认证请求以用户 ID 为键；匿名请求以客户端 IP 为键，并遵循 `TRUSTED_PROXY_HOPS` 设置。
 
-### Background Tasks (Taskiq)
+<a id="background-tasks-taskiq"></a>
+
+### 后台任务（Taskiq）
 
 ```env
 TASKIQ_BROKER_TYPE=redis        # or "rabbitmq"
@@ -173,6 +192,8 @@ TASKIQ_REDIS_DB=3
 TASKIQ_REDIS_PASSWORD=
 ```
 
+<a id="cors"></a>
+
 ### CORS
 
 ```env
@@ -183,8 +204,8 @@ CORS_ALLOW_METHODS=*
 CORS_ALLOW_HEADERS=*
 ```
 
-!!! warning "CORS in Production"
-    Never use `*` for `CORS_ORIGINS` in production. Specify exact domains and explicit methods/headers:
+!!! warning "生产环境中的 CORS"
+    生产环境的 `CORS_ORIGINS` 不应使用 `*`。请指定确切域名，并明确允许的方法和请求头：
 
     ```env
     CORS_ORIGINS=https://yourapp.com,https://www.yourapp.com
@@ -192,9 +213,11 @@ CORS_ALLOW_HEADERS=*
     CORS_ALLOW_HEADERS=Authorization,Content-Type
     ```
 
-### OAuth (Optional)
+<a id="oauth-optional"></a>
 
-For Google / GitHub sign-in:
+### OAuth（可选）
+
+Google / GitHub 登录配置：
 
 ```env
 OAUTH_REDIRECT_BASE_URL=http://localhost:8000
@@ -208,21 +231,23 @@ OAUTH_GITHUB_CLIENT_ID=
 OAUTH_GITHUB_CLIENT_SECRET=
 ```
 
-A provider is wired when both of its settings are set, so you can run Google, GitHub, both or neither; leave a pair empty to disable that provider. See [Authentication](../user-guide/authentication/index.md) for the OAuth setup walkthrough.
+当某个提供方的两项设置均已填写时，才会接入该提供方。因此可以仅启用 Google、仅启用 GitHub、同时启用两者或全部关闭；将对应的一对配置留空即可禁用该提供方。详细流程见[身份认证](../user-guide/authentication/index.md)。
 
-The built-in crudauth OAuth router keeps the existing paths (`/api/v1/auth/oauth/{provider}` and
-`/api/v1/auth/oauth/callback/{provider}`), returns JSON, sets session cookies, binds state to the
-browser, and validates post-login redirects as same-origin relative paths.
+crudauth 内置 OAuth 路由保留现有路径 `/api/v1/auth/oauth/{provider}` 和 `/api/v1/auth/oauth/callback/{provider}`，返回 JSON，设置会话 Cookie，将 state 绑定到浏览器，并校验登录后的重定向地址必须是同源相对路径。
 
-### Admin Interface
+<a id="admin-interface"></a>
+
+### 管理界面
 
 ```env
 ADMIN_ENABLED=true              # enables SQLAdmin at /admin
 ```
 
-## Docker Compose Settings
+<a id="docker-compose-settings"></a>
 
-When running with Docker Compose, services reach each other by service name. Use these hosts in `.env`:
+## Docker Compose 配置
+
+使用 Docker Compose 时，服务之间通过服务名访问。在 `.env` 中使用以下主机名：
 
 ```env
 POSTGRES_SERVER=postgres
@@ -231,11 +256,13 @@ RATE_LIMITER_REDIS_HOST=redis
 TASKIQ_REDIS_HOST=redis
 ```
 
-## That's It
+<a id="thats-it"></a>
 
-With these settings, start the app:
+## 启动应用
 
-=== "Local with uv"
+完成上述设置后，启动应用：
+
+=== "使用 uv 在本地运行"
 
     ```bash
     uv run --no-sync fastapi dev src/interfaces/main.py
@@ -247,4 +274,4 @@ With these settings, start the app:
     docker compose up
     ```
 
-For the full reference and advanced settings, see [User Guide → Configuration](../user-guide/configuration/index.md).
+完整参考和高级配置见[用户指南 → 配置](../user-guide/configuration/index.md)。

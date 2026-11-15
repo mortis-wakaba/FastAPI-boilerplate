@@ -1,54 +1,55 @@
-# Permissions and Authorization
+<a id="permissions-and-authorization"></a>
 
-Authentication answers "who are you?". Authorization answers "what can you do?". This page covers the boilerplate's authorization patterns: role permissions, superuser flags, resource ownership, tier-based limits, and API key permissions.
+# 权限与授权
 
-Roles are the `rbac` feature, and the permission registry is core. A project without `rbac` keeps the
-registry and every `require_permissions` check, which then pass for superusers only: see
-[Composable Features](../composable-features.md).
+认证确定身份，授权确定可执行操作。本页介绍角色权限、超级用户标记、资源归属、等级限制和 API 密钥权限。
+
+角色属于 `rbac` 功能，权限注册表属于核心。移除 rbac 后，注册表和 `require_permissions` 检查保留，但只有超级用户通过，见[可组合功能](../composable-features.md)。
 
 <p align="center">
-  <img src="../../assets/credential-narrowing-light.png#only-light" alt="A credential's effective permissions are what the account holds, narrowed to what the credential carries" width="100%">
-  <img src="../../assets/credential-narrowing-dark.png#only-dark" alt="A credential's effective permissions are what the account holds, narrowed to what the credential carries" width="100%">
+  <img src="../../assets/credential-narrowing-light.png#only-light" alt="凭据的有效权限等于账户权限与凭据范围的交集" width="100%">
+  <img src="../../assets/credential-narrowing-dark.png#only-dark" alt="凭据的有效权限等于账户权限与凭据范围的交集" width="100%">
 </p>
 
-## Authorization Patterns
+<a id="authorization-patterns"></a>
 
-The boilerplate ships five overlapping mechanisms. Pick the one(s) that fit your use case.
+## 授权模式
 
-| Pattern | Where it lives | When to use |
-|---------|----------------|-------------|
-| **Role permissions** | `Role` + `RolePermission` + `UserRole` models, `require_permissions` | Granting a named capability to a group of users |
-| **Superuser flag** | `User.is_superuser` boolean | Admin-only operations |
-| **Resource ownership** | Service-layer permission checks | "Users can only edit their own X" |
-| **Tier-based limits** | `Tier` model + `RateLimit` rules | Subscription gating, rate limits |
-| **API key scope** | `APIKey.permissions`, a list of registry permission names | What a key is allowed to do, once a key can authenticate a request |
+五种机制可组合使用：
 
-These compose. A typical request goes through:
+| 模式 | 位置 | 场景 |
+|------|------|------|
+| **角色权限** | `Role`、`RolePermission`、`UserRole`、`require_permissions` | 向用户组授予命名能力 |
+| **超级用户** | `User.is_superuser` | 仅管理员操作 |
+| **资源归属** | 服务层检查 | 用户只能修改自己的资源 |
+| **等级限制** | `Tier`、`RateLimit` | 套餐功能控制、限流 |
+| **API 密钥 scope** | `APIKey.permissions` 注册权限名列表 | 密钥认证后允许执行的操作 |
 
-1. **Authentication** — the session cookie, or an API key, identifies *who*
-2. **Coarse access** — role permissions, or the superuser flag, for privileged endpoints
-3. **Fine-grained access** — service-layer ownership / tier checks
-4. **Rate limiting** — tier-based per-route limits (separate concern)
+典型请求依次经过：认证身份、角色或超级用户粗粒度检查、服务层归属或等级细粒度检查，以及独立的按等级逐路由限流。
 
-## Role-Based Permissions
+<a id="role-based-permissions"></a>
 
-A permission is a flat `resource.action` string — `user.read`, `tier.update`. Permissions are never granted to a user directly: a `Role` carries a set of them, and a user is assigned roles.
+## 基于角色的权限
+
+权限是扁平 `resource.action` 字符串，如 `user.read`、`tier.update`。不直接授予用户，而是放入 `Role`，再给用户分配角色。
 
 ```text
 User ──< UserRole >── Role ──< RolePermission
 ```
 
-Three tables in `modules/role/models.py`:
+`modules/role/models.py` 定义三表：
 
-| Table | Columns | Notes |
-|-------|---------|-------|
-| `roles` | `id`, `name` (unique), `description` | No soft delete — a deleted role is gone |
-| `role_permissions` | `role_id`, `permission_name` (composite PK) | `ON DELETE CASCADE` from `roles` |
-| `user_roles` | `user_id`, `role_id` (composite PK) | `ON DELETE CASCADE` from both sides |
+| 表 | 列 | 说明 |
+|----|----|------|
+| `roles` | `id`、唯一 `name`、`description` | 不软删除 |
+| `role_permissions` | `role_id`、`permission_name` 复合主键 | 从 roles `ON DELETE CASCADE` |
+| `user_roles` | `user_id`、`role_id` 复合主键 | 两端均 `ON DELETE CASCADE` |
 
-### Declaring a Module's Permissions
+<a id="declaring-a-modules-permissions"></a>
 
-Each module owns its permission names in its own `permissions.py`, as a `StrEnum` decorated with `@register_permissions("<resource>")`:
+### 声明模块权限
+
+模块在自己的 `permissions.py` 用 `StrEnum` 声明，并标记 `@register_permissions("<resource>")`：
 
 ```python
 # modules/user/permissions.py
@@ -65,23 +66,25 @@ class UserPermission(StrEnum):
     DELETE = "user.delete"
 ```
 
-Registration is validated: the resource must match `^[a-z][a-z0-9_]*$`, every member must be `<resource>.<action>` with an action matching the same pattern, and the whole name must fit the 100-character `permission_name` column. A resource can only be registered once.
+注册时校验：资源名匹配 `^[a-z][a-z0-9_]*$`，成员格式为 `<resource>.<action>`，action 使用相同模式，完整名称不超过 `permission_name` 的 100 字符。资源只能注册一次。
 
-`discover_permissions()` walks `src.modules.*.permissions` and imports each one; `modules/__init__.py` calls it at import time, so a new `permissions.py` needs no registration elsewhere.
+`discover_permissions()` 遍历导入 `src.modules.*.permissions`，`modules/__init__.py` 导入时调用它，新增文件无需其他注册。
 
-The registry in `infrastructure/permissions.py` is what the rest of the app reads:
+应用读取 `infrastructure/permissions.py` 的注册表：
 
-| Function | Returns |
-|----------|---------|
-| `all_permissions()` | Every registered name, as a `frozenset[str]` |
-| `permission_groups()` | `{resource: (names, ...)}` — for a UI that offers permissions per resource |
-| `is_known_permission(name)` | Whether a name is registered |
+| 函数 | 返回 |
+|------|------|
+| `all_permissions()` | 全部名称的 `frozenset[str]` |
+| `permission_groups()` | `{resource: (names, ...)}`，供 UI 按资源分组 |
+| `is_known_permission(name)` | 是否已注册 |
 
-Unregistered names can't be stored: `RolePermission` validates `permission_name` against the registry and raises. In the other direction, a name that was stored and has since been removed from the code is ignored when permissions are loaded, so deleting a permission from a `StrEnum` can never grant anything.
+`RolePermission` 拒绝存储未注册名称。已存但后来从代码移除的名称，在加载时忽略，删除枚举成员不会意外授予权限。
 
-### Protecting a Route
+<a id="protecting-a-route"></a>
 
-`require_permissions(*names)` returns a dependency that answers 403 unless the caller holds every name. It injects nothing into the handler, so it goes in the route's `dependencies`:
+### 保护路由
+
+`require_permissions(*names)` 要求调用者持有所有名称，否则 403。不注入值，应放 `dependencies`：
 
 ```python
 # modules/user/routes.py
@@ -102,13 +105,15 @@ async def get_users(
     ...
 ```
 
-Unknown names are a programming error, not a runtime one: `require_permissions` raises when the route is declared, so a typo fails at import rather than on the first request.
+未知名称是编程错误，声明路由时即抛错，拼写错误在导入时暴露。
 
-**Superusers bypass every permission check.** `require_permissions` passes them without a lookup, and `get_current_permissions` reports them as holding every registered permission — so a superuser needs no roles.
+**超级用户绕过全部权限检查**。`require_permissions` 无需查表即可通过，`get_current_permissions` 返回所有注册权限，无需角色。
 
-### Reading the Caller's Permissions
+<a id="reading-the-callers-permissions"></a>
 
-When the handler itself has to decide, take the permission set instead of a guard. `CurrentPermissionsDep` (from `infrastructure/auth/deps.py`) is `get_current_permissions` as an `Annotated` alias; FastAPI resolves it once per request, so several guards and parameters share one query:
+### 读取调用者权限
+
+处理器需要自行判断时，使用 `infrastructure/auth/deps.py` 的 `CurrentPermissionsDep`，即 `get_current_permissions` 的 Annotated 别名。请求内只解析一次，多处保护共用查询：
 
 ```python
 from ...infrastructure.auth.deps import CurrentPermissionsDep
@@ -127,11 +132,13 @@ async def update_user_profile(
     ...
 ```
 
-`load_permissions(db, user_id, is_superuser=...)` is the same lookup as a plain function, for code outside a request — or, as in the route above, for reading *another* user's permissions to compare against the caller's.
+`load_permissions(db, user_id, is_superuser=...)` 是相同逻辑的普通函数，可在请求外或查询其他用户权限进行比较时使用。
 
-### Granting Permissions
+<a id="granting-permissions"></a>
 
-A role is a row in `roles` plus one `role_permissions` row per permission; assigning it is a row in `user_roles`. Write them through the ORM (from a script, a migration, or your own admin tooling):
+### 授予权限
+
+角色对应一行 `roles` 和每权限一行 `role_permissions`，分配对应一行 `user_roles`。可从脚本、迁移或自建管理工具使用 ORM 写入：
 
 ```python
 from src.modules.role.models import Role, RolePermission, UserRole
@@ -145,23 +152,23 @@ db.add(UserRole(user_id=user_id, role_id=role.id))
 await db.commit()
 ```
 
-## Managing Roles
+<a id="managing-roles"></a>
 
-The rbac feature mounts a role API under `/api/v1/roles`. Every route is gated by its own
-`role.*` permission **and** by the delegation checks: a caller can neither grant a permission nor
-assign a role carrying one unless they hold it themselves. Superusers pass both.
+## 管理角色
 
-| Route | Permission | Also checked |
-|---|---|---|
-| `GET /api/v1/roles/` | `role.read` | — |
-| `GET /api/v1/roles/{role_id}` | `role.read` | — |
-| `POST /api/v1/roles/` | `role.create` | the caller holds every permission the new role carries |
-| `PATCH /api/v1/roles/{role_id}` | `role.update` | the caller holds everything the role carries |
-| `PUT /api/v1/roles/{role_id}/permissions` | `role.update` | the caller holds every permission the change adds **or removes**, **and** no live account holding the role is a superuser or holds anything the caller doesn't |
-| `DELETE /api/v1/roles/{role_id}` | `role.delete` | the caller holds everything the role carries, **and** no live account holding the role is a superuser or holds anything the caller doesn't |
-| `POST /api/v1/roles/{role_id}/users/{user_id}` | `role.assign` | the caller holds everything the role carries, **and** the account is not a superuser and holds nothing the caller doesn't |
-| `DELETE /api/v1/roles/{role_id}/users/{user_id}` | `role.assign` | the same |
-| `GET /api/v1/users/{user_id}/roles` | `role.read` | — |
+rbac 在 `/api/v1/roles` 挂载 API，每条路由要求自身 `role.*` 权限及委派检查。调用者不能授予自己没有的权限，也不能分配包含这些权限的角色，超级用户两项均通过。
+
+| 路由 | 权限 | 额外检查 |
+|------|------|----------|
+| `GET /api/v1/roles/` | `role.read` | 无 |
+| `GET /api/v1/roles/{role_id}` | `role.read` | 无 |
+| `POST /api/v1/roles/` | `role.create` | 拥有新角色全部权限 |
+| `PATCH /api/v1/roles/{role_id}` | `role.update` | 拥有角色全部权限 |
+| `PUT /api/v1/roles/{role_id}/permissions` | `role.update` | 拥有新增和删除的全部权限；所有活跃持有者均非超级用户，且不持有调用者没有的权限 |
+| `DELETE /api/v1/roles/{role_id}` | `role.delete` | 拥有角色全部权限，且所有活跃持有者不强于调用者、不是超级用户 |
+| `POST /api/v1/roles/{role_id}/users/{user_id}` | `role.assign` | 拥有角色全部权限，目标账户非超级用户且不持有调用者缺少的权限 |
+| `DELETE /api/v1/roles/{role_id}/users/{user_id}` | `role.assign` | 同上 |
+| `GET /api/v1/users/{user_id}/roles` | `role.read` | 无 |
 
 ```bash
 # Create a role carrying permissions you hold
@@ -173,51 +180,25 @@ curl -X POST http://localhost:8000/api/v1/roles/ -b cookies.txt \
 curl -X POST http://localhost:8000/api/v1/roles/3/users/42 -b cookies.txt -H "X-CSRF-Token: <token>"
 ```
 
-Only registered permission names are accepted: anything else answers `422`, and the refusal doesn't
-echo what was sent. A refused delegation answers `403` and writes nothing — including the reverse
-cases: emptying or relabelling a role whose permissions the caller doesn't hold, and changing the
-roles of an account stronger than the caller's own. That last rule is the one a `user.update` holder
-is already held to when editing an account, because changing which roles an account holds is
-another way to take it over, and emptying or deleting a role is held to it for every account that
-holds the role, since either one takes the role's permissions away from all of them at once. An
-account a soft delete has taken out is not one of those: its grants reach nobody, while its
-assignment rows stay behind.
+只接受注册权限，否则返回不回显输入的 `422`。拒绝委派返回 `403` 且不写入，包括反向操作：清空或改名一个调用者无权持有的角色，或改变更强账户的角色。修改角色也是接管账户的方式，与 `user.update` 的规则一致；清空或删除角色会同时移除全部持有者的权限，因此检查所有账户。软删除账户不参与，因为其权限不会授予任何有效用户，分配行仍保留。
 
-A stored name the registry no longer knows counts for nothing, and is not held against the caller
-either: a role carrying a name nothing declares any more can still be renamed, emptied and deleted
-by whoever holds the registered permissions it carries, and setting its permissions is what drops
-the stale name. Otherwise removing a feature would strand every role that carried one of its
-permissions, a superuser included.
+注册表不再认识的旧名称既不授予权限，也不阻止调用者管理角色。拥有角色其余有效权限的人仍可改名、清空或删除，设置权限时会清掉旧名称，否则移除功能会使携带其权限的角色无法管理。
 
-Two writes to one role queue rather than race. Every write path takes the role's row first
-(`SELECT … FOR UPDATE`): two requests assigning one role to one account both answer `201`, two
-replacing what it carries leave it carrying one of the two sets rather than both, and whichever
-arrives after the role was deleted answers `404`. An account a soft delete took out answers `404`
-as well, and one the admin panel deletes while an assignment is being written waits for it.
+同一角色的写入串行而非竞态。每条写路径先 `SELECT … FOR UPDATE` 锁定角色：并发分配同角色到同账户均返回 `201`；并发替换最终为其中一套而非并集；角色删除后到达的请求返回 `404`。软删除账户返回 `404`，后台并发删除账户会等待分配写入。
 
-The account the write is about is held too, since the stronger-account checks read what it holds.
-An assignment takes that row `FOR NO KEY UPDATE`, so a superuser handing the same account a role
-the caller cannot reach lands either side of the write rather than between its check and its own
-insert. Taking a role away, or replacing what it carries, is a change to every holder's grants, so
-those rows are held `FOR SHARE`: two of those run at once, while an assignment to one of the
-holders waits for them. The role's row is always taken before an account's, so the two orders
-never meet.
+目标账户也被锁定，因为强弱检查读取其权限。分配使用 `FOR NO KEY UPDATE`，确保超级用户授予更强角色不会插在检查与写入之间。撤销角色或替换权限影响所有持有者，因此对这些账户使用 `FOR SHARE`，两次此类操作可并发，但角色分配等待。始终先锁角色再锁账户，保持顺序一致。
 
-What does wait is every write to an account's own row while a role write holds it: a profile edit,
-and the bookkeeping a sign-in writes there. Taking a role away holds the row of every account
-holding it until the delete commits. Both are the length of one role write, which reads a handful
-of rows and commits, and a row that only names the account — an API key, a usage row — waits for
-none of it.
+角色写入持有账户行期间，资料更新和登录记账等账户写入会等待。撤销角色持有全部相关账户直到删除提交。锁时长为少量查询并提交的一次角色写入。仅通过外键引用账户的 API 密钥、用量行不受这些锁等待影响。
 
-A `role_id` or a `user_id` outside `1..2147483647` answers `422`. No `Integer` column holds a value
-past that, so the lookup used to reach the database and fail there.
+`role_id`、`user_id` 超出 `1..2147483647` 返回 `422`，避免 Integer 列范围外的值进入数据库。
 
-A role name is unique, and the unique constraint has the last word: two requests racing for one name
-give the loser a `409`, not a `500`.
+角色名称唯一，数据库约束最终裁决并发，冲突方返回 `409` 而非 500。
 
-## Reading the Permissions
+<a id="reading-the-permissions"></a>
 
-Two routes read them, both needing a session (the rbac feature mounts them):
+## 读取权限
+
+rbac 提供两条要求会话的读取路由：
 
 ```bash
 # Every permission the running project has, grouped by the resource that declared it —
@@ -230,22 +211,17 @@ curl http://localhost:8000/api/v1/permissions/me -b cookies.txt
 # → {"permissions": ["user.update"]}
 ```
 
-A superuser's own listing is every registered permission. A stored grant whose name is no longer
-registered appears in neither: the registry is what makes a name mean anything.
+超级用户自身列表包含所有注册权限。已失效名称不出现在任何列表，注册表赋予名称实际含义。
 
-RBAC here is **global roles**: a role means the same thing everywhere in the project, and there is
-no per-tenant or per-object scoping. A permission answers "may this account do this kind of thing",
-not "may it do this to that row" — ownership checks stay in the services.
+此处 RBAC 是**全局角色**，没有租户或对象范围。权限判断账户能否执行某类操作，具体能否操作某行仍由服务检查归属。
 
-With the admin feature the panel carries the same three tables — see
-[Admin Panel](../admin-panel/index.md#whats-included). The panel signs in with the `ADMIN_*`
-credentials rather than as an account, and those already let it set `is_superuser` on anybody, so
-there is no weaker operator for the delegation checks above to hold back there. What the panel does
-enforce is that a grant names a permission the registry knows.
+启用 admin 后，后台包含同三张表，见[管理后台](../admin-panel/index.md#whats-included)。后台使用 `ADMIN_*` 独立凭据，不对应普通账户，已可修改任何人的 `is_superuser`，因此没有需要委派规则约束的较弱操作员，但仍要求权限名已注册。
 
-## Superuser Authorization
+<a id="superuser-authorization"></a>
 
-The User model has an `is_superuser: bool` column. Endpoints that should only be accessible to admins use the `get_current_superuser` dependency:
+## 超级用户授权
+
+用户模型的 `is_superuser: bool` 用于管理员接口，通过 `get_current_superuser` 检查：
 
 ```python
 from typing import Annotated, Any
@@ -266,36 +242,40 @@ async def gdpr_anonymize(
     ...
 ```
 
-The leading `_:` is the codebase convention for dependency-only parameters whose value isn't used.
+未使用的依赖参数以 `_:` 命名。未认证返回 401，已认证非超级用户返回 403，见[会话](sessions.md)。
 
-`get_current_superuser` returns 401 if not authenticated and 403 if authenticated but not a superuser. See [Sessions](sessions.md) for the dependency reference.
+<a id="when-to-use-the-superuser-flag"></a>
 
-### When to Use the Superuser Flag
+### 适用场景
 
-- User management (create/delete other users)
-- Tier assignment (`PATCH /api/v1/users/{username}/tier`)
-- Rate limit configuration (`PATCH /api/v1/rate-limits/{name}`)
-- GDPR data anonymization
-- System configuration changes
+- 创建或删除其他用户。
+- `PATCH /api/v1/users/{username}/tier` 分配等级。
+- `PATCH /api/v1/rate-limits/{name}` 配置限流。
+- GDPR 匿名化。
+- 系统配置变更。
 
-Anything a *subset* of staff should be able to do is better expressed as a permission on a role than as another superuser.
+只允许部分员工执行的操作，更适合角色权限，而非再增加超级用户。
 
-### Bootstrapping the First Superuser
+<a id="bootstrapping-the-first-superuser"></a>
 
-The first superuser is created by `scripts/setup_initial_data.py` from `ADMIN_*` env vars on first run:
+### 初始化首个超级用户
+
+`scripts/setup_initial_data.py` 首次运行时读取 `ADMIN_*`：
 
 ```bash
 cd backend
 uv run --no-sync python -m scripts.setup_initial_data
 ```
 
-To grant superuser to an existing user, flip the column directly via the admin UI (`/admin`) or a one-off SQL update.
+已有用户可通过 `/admin` 或一次性 SQL 修改该列。
 
-## Resource Ownership
+<a id="resource-ownership"></a>
 
-Most "users can only modify their own data" rules belong in the **service layer**, not the route. The service raises a `PermissionDeniedError`, which the global handler maps to HTTP 403.
+## 资源归属
 
-Real example from `modules/user/service.py`:
+用户只能修改自身数据等规则放在**服务层**。服务抛 `PermissionDeniedError`，全局映射为 HTTP 403。
+
+`modules/user/service.py` 示例：
 
 ```python
 from ..common.exceptions import PermissionDeniedError
@@ -312,9 +292,7 @@ async def verify_user_permission(
         raise PermissionDeniedError(f"Cannot {action} for another user")
 ```
 
-Routes call this before dispatching the operation.
-
-Where ownership and a role permission both apply, the service takes the permission set too. `PATCH /api/v1/users/{username}` is the example that ships:
+路由在执行操作前调用检查。归属和角色权限同时适用时，也传入权限集合。模板的 `PATCH /api/v1/users/{username}`：
 
 ```python
 # modules/user/routes.py
@@ -341,20 +319,24 @@ async def update_user_profile(
     return {"message": "User updated successfully"}
 ```
 
-The rules this enforces:
+规则如下：
 
-- A user may edit their own profile, and a credential that carries a scope needs `user.update` to edit that profile too.
-- A superuser may edit anyone.
-- A `user.update` holder may edit *another* user only when that user is not a superuser and holds no permission the requester lacks — editing an account is a way to take it over, so it can't reach a stronger one.
-- Only a superuser may change another user's email address: a verified provider email is how an OAuth login is matched to an existing account.
+- 用户可改自己的资料；带 scope 的凭据也需 `user.update`。
+- 超级用户可改任何人。
+- 非超级用户的 `user.update` 持有者只能修改非超级用户、且权限不超过自己的其他账户，因为编辑可用于接管账户。
+- 只有超级用户可修改他人邮箱，已验证的提供方邮箱用于 OAuth 匹配已有账户。
 
-The public `UserUpdate` schema accepts `name`, `username`, `email` and `profile_image_url` only. `google_id`, `github_id`, `oauth_provider`, `email_verified` and `oauth_updated_at` moved to `UserAdminUpdate`, which the admin panel uses — sending them to the API returns 422.
+本节原文称公开 `UserUpdate` 接受 `name`、`username`、`email`、`profile_image_url`；OAuth 标识、验证标记和更新时间移至后台 `UserAdminUpdate`，发到 API 返回 422。
 
-The exception flows up to the global handler (registered in `infrastructure/app_factory.py`) which translates it via the `EXCEPTION_MAPPING` table — `PermissionDeniedError` → `ForbiddenException` (403). See [Exceptions](../api/exceptions.md) for the full mapping pipeline.
+> 译注：用户管理专章说明邮箱也已从公开更新 Schema 移除，应通过确认流程变更。
 
-### Generic Ownership Pattern
+异常向上传给 `infrastructure/app_factory.py` 注册的处理器，通过 `EXCEPTION_MAPPING` 将 `PermissionDeniedError` 映射到 403，见[异常处理](../api/exceptions.md)。
 
-For your own modules:
+<a id="generic-ownership-pattern"></a>
+
+### 通用归属模式
+
+自定义模块示例：
 
 ```python
 # modules/widgets/service.py
@@ -375,19 +357,23 @@ class WidgetService:
         await crud_widgets.delete(db=db, id=widget_id)
 ```
 
-Three rules to follow:
+遵循三项规则：
 
-1. **Service raises domain exceptions, not HTTP exceptions.** Lets the same logic be reused outside routes (admin scripts, tests, taskiq jobs).
-2. **Superuser bypass is explicit.** `not current_user["is_superuser"]` makes the rule readable.
-3. **Order: existence check first, then ownership.** A 404 is preferred to a 403 for resources the user shouldn't even know about — see the [Hide Resource Existence](../api/exceptions.md#hide-resource-existence) note.
+1. **服务抛领域异常而非 HTTP 异常**，便于脚本、测试、Taskiq 复用。
+2. **显式超级用户绕过**，用 `not current_user["is_superuser"]` 清晰表达。
+3. **先检查存在，再检查归属**。原文建议对用户不应知道的资源返回 404 而非 403，见[隐藏资源存在性](../api/exceptions.md#hide-resource-existence)。
 
-## Tier-Based Authorization
+<a id="tier-based-authorization"></a>
 
-Every user has a `tier_id` foreign key to the `Tier` model. The boilerplate ships **bare tiers** — just `name` and `description`, no built-in feature mapping or pricing logic. You decide what tiers mean.
+## 基于等级的授权
 
-### Reading the User's Tier
+每个用户以 `tier_id` 引用 `Tier`。模板只提供**基础等级**，包含 `name` 和 `description`，不内置功能映射或定价，由项目自行定义含义。
 
-`User.tier` is loaded automatically via `lazy="selectin"`, so a fetched user record includes their tier:
+<a id="reading-the-users-tier"></a>
+
+### 读取等级
+
+`User.tier` 通过 `lazy="selectin"` 自动加载：
 
 ```python
 @router.get("/me", response_model=UserRead)
@@ -398,9 +384,11 @@ async def me(
     return current_user
 ```
 
-### Gating a Feature on Tier Name
+<a id="gating-a-feature-on-tier-name"></a>
 
-For a simple feature gate, check the tier name directly in the service:
+### 按等级名控制功能
+
+简单开关可在服务中检查等级名：
 
 ```python
 async def export_data(self, current_user: dict[str, Any], db: AsyncSession) -> bytes:
@@ -410,13 +398,15 @@ async def export_data(self, current_user: dict[str, Any], db: AsyncSession) -> b
     # ...generate export...
 ```
 
-This works for "binary" features. For more complex models (per-feature quotas, multiple add-ons), consider building an entitlements system on top — that's outside the scope of the boilerplate.
+适合二元功能控制。每功能配额、多附加套餐等复杂需求，可另建权益系统，不在模板范围内。
 
-### Tier-Based Rate Limits
+<a id="tier-based-rate-limits"></a>
 
-Rate limiting *is* built-in: each `RateLimit` row binds a tier to a path with a `limit` and `period`. crudauth's limiter, wired in `infrastructure/auth/setup.py`, enforces these per request. See [Rate Limiting](../rate-limiting/index.md).
+### 按等级限流
 
-To configure rate limits for a tier:
+每条 `RateLimit` 将等级、路径、`limit` 和 `period` 关联。`infrastructure/auth/setup.py` 组装的 crudauth 限流器逐请求执行，见[限流](../rate-limiting/index.md)。
+
+配置等级规则：
 
 ```bash
 # Create a rate limit (admin only)
@@ -433,10 +423,11 @@ curl -X POST http://localhost:8000/api/v1/rate-limits/ \
   }'
 ```
 
-## API Key Scope
+<a id="api-key-scope"></a>
 
-A key's scope is a list of registry permission names — the same vocabulary a role carries and
-`require_permissions` gates on — stored on the key row:
+## API 密钥 scope
+
+scope 存在密钥行，是与角色、`require_permissions` 共用的注册权限名列表：
 
 ```python
 # modules/api_keys/models.py
@@ -446,10 +437,7 @@ class APIKey(Base, TimestampMixin):
     permissions: Mapped[list[str]] = mapped_column(JSON, insert_default=list)
 ```
 
-Create and update validate every name against the registry, so a scope can only name a permission
-the project declares. An unregistered name answers `422` without echoing what was sent, and the
-names come back deduplicated and sorted. A key created without `permissions` is **unscoped**: it
-names its owner and carries no permission at all.
+创建和更新逐项验证，未注册名称返回不回显输入的 `422`，返回名称排序并去重。省略 `permissions` 的密钥**没有权限范围**，只标识所有者，不附带任何权限。
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/api-keys/ \
@@ -459,48 +447,30 @@ curl -X POST http://localhost:8000/api/v1/api-keys/ \
   -d '{"name": "Read-only integration", "permissions": ["user.read"], "usage_limits": {"requests_per_day": 10000}}'
 ```
 
-A stored name the registry no longer knows is read back as it is and counts for nothing, the same
-way a role's stale grant does. A scope stored in a shape that is not a list of names, the object an
-older version wrote, is not read back at all: the key answers `401` with a warning naming it, until
-`scripts/cleanup_api_key_json.py` rewrites the row.
+已存但失效的名称按原样读取、不授予权限。旧版本存储的对象等非名称列表结构不读取，密钥返回 `401` 并记录警告，直到 `scripts/cleanup_api_key_json.py` 修复。
 
-### What a key holds
+<a id="what-a-key-holds"></a>
 
-A key-authenticated request holds **its owner's permissions, narrowed to the key's scope**. The scope
-never grants: a permission the owner loses disappears from the key at the next request, and a key
-scoped to nothing holds nothing — it names its owner and that is all. `GET /api/v1/permissions/me`
-answers with the narrowed set, so a client can read exactly what its key can do.
+### 密钥拥有的权限
 
-A key's scope may name only permissions its creator holds at the time: `POST /api/v1/api-keys/` and
-a `PATCH` that widens one answer `403` otherwise, so a key can never be minted stronger than the
-credential minting it.
+有效权限是**所有者权限与 scope 的交集**，scope 不授予新能力。所有者失去的权限在下次请求消失，空 scope 只有身份。`GET /api/v1/permissions/me` 返回收窄结果。
 
-!!! warning "A key is never a superuser"
-    `is_superuser` grants what no scope can name — it bypasses the ownership checks in the services,
-    not just permission gates — so a credential carrying a scope is held to that scope whatever the
-    account is marked. A superuser's key scoped to `["user.read"]` holds `user.read`, passes a route
-    gated on it, and is refused by `require_permissions("role.read")` and by every superuser-only
-    route. The superuser's own session is unaffected.
+创建及扩大 scope 的 PATCH 只能使用创建者持有的权限，否则 `403`，密钥不会比签发凭据更强。
 
-    This holds everywhere the flag was read: the delegation checks behind the role routes compare
-    against what the *credential* holds, so a superuser's key scoped to `role.assign` cannot assign
-    a role carrying anything its scope lacks; and editing another account, or reading its tier or
-    rate limits, goes by the acting credential's flag rather than the account's row.
+!!! warning "密钥永远不是超级用户"
+    `is_superuser` 不只绕过权限门，还绕过服务归属检查，无法用 scope 表达。因此带 scope 的凭据始终受范围约束，无论账户标记如何。超级用户的 `['user.read']` 密钥只能通过相应路由，不能通过 `role.read` 和任何超级用户接口；超级用户自身会话不受影响。
 
-    Ownership is a separate axis: a scope narrows permissions, not what an account owns. It is no
-    licence on its own, though. Editing a profile takes `user.update` of a scoped credential even
-    where the profile is its owner's, so a key minted for reading cannot rename the account behind
-    it. The other self-service routes, the password, the address, closing the account and managing
-    keys, take a session and refuse a key outright
-    ([API keys](api-keys.md#what-a-key-cannot-do)).
+    所有检查都使用行动凭据的权限和标记。仅有 `role.assign` 的超级用户密钥不能分配含范围外权限的角色；修改他人账户、读取其等级和限流也不能借账户本身的标记绕过。
 
-A key's lifecycle is `is_active` and `expires_at`: revoking is one way, and an expiry can be
-brought forward but never pushed back. [API Keys](api-keys.md#revoking-expiring-and-rotating) has
-the routes.
+    scope 收窄权限，不改变资源归属，但归属也不是独立许可。改自己的资料仍需 `user.update`，只读密钥不能重命名账户。密码、邮箱、关闭账户和密钥管理直接要求会话，见[密钥不能做什么](api-keys.md#what-a-key-cannot-do)。
 
-## Combining Patterns
+生命周期由 `is_active`、`expires_at` 控制。撤销不可逆，到期只能提前，见[撤销、到期与轮换](api-keys.md#revoking-expiring-and-rotating)。
 
-A real endpoint often uses several at once:
+<a id="combining-patterns"></a>
+
+## 组合模式
+
+实际接口常同时使用多项检查：
 
 ```python
 @router.delete("/widgets/{widget_id}", status_code=204)
@@ -517,11 +487,13 @@ async def delete_widget(
     await widget_service.delete(widget_id, current_user, db)
 ```
 
-The route stays trivial. Authorization rules accumulate in the service, where they're testable and reusable.
+路由保持简单，授权规则集中在服务中以便测试和复用。
 
-## Testing Authorization
+<a id="testing-authorization"></a>
 
-Test the **service**, not the route, for permission rules — they're easier to set up and faster to run.
+## 授权测试
+
+权限规则优先测试**服务**，更易准备、执行更快：
 
 ```python
 import pytest
@@ -547,15 +519,22 @@ async def test_superuser_can_update_other_users():
     await service.verify_user_permission(current_user, "bob", "update profile")
 ```
 
-For end-to-end coverage, integration tests against `TestClient` exercise the full session-cookie + permission-check stack. See [Testing](../testing.md).
+完整流程通过 `TestClient` 集成测试验证会话 Cookie 与权限检查，见[测试](../testing.md)。
 
-## Best Practices
+<a id="best-practices"></a>
 
-### Keep authorization in services
+## 最佳实践
 
-Routes do dependency injection and HTTP shaping; services hold rules. If a `PermissionDeniedError` raise feels out of place in your service, that's a sign your service is doing more than business logic.
+<a id="keep-authorization-in-services"></a>
 
-### Order checks: authn → existence → ownership → quota
+### 授权放在服务中
+
+路由负责注入和 HTTP，服务负责规则。服务中抛出权限异常应与业务逻辑一致。
+
+<a id="order-checks-authn-existence-ownership-quota"></a>
+<a id="order-checks-authn--existence--ownership--quota"></a>
+
+### 检查顺序：认证 → 存在 → 归属 → 配额
 
 ```python
 # 1. Authenticated? — done by the dependency
@@ -570,19 +549,25 @@ if not within_tier_limits(...):
     raise PermissionDeniedError(...)
 ```
 
-This order prevents leaking existence (404 before 403) and keeps the cheap checks first.
+原文建议此顺序将低成本检查放前，并用 404 优先于 403 减少存在性泄露。
 
-### Don't reinvent rate limits
+<a id="dont-reinvent-rate-limits"></a>
 
-The built-in tier rate-limiter middleware is enforced before your route runs. Don't roll your own per-feature counters unless you need something the middleware can't express. See [Rate Limiting](../rate-limiting/index.md).
+### 不重复实现限流
 
-### Audit superuser actions
+内置按等级限流在路由前执行，只有无法表达需求时才添加独立计数，见[限流](../rate-limiting/index.md)。
 
-Superuser endpoints touch sensitive data. Log the actor + action server-side — the boilerplate's logging infrastructure (with `correlation_id` + `support_id`) makes this straightforward. See [Logging](../../user-guide/configuration/index.md) for the setup.
+<a id="audit-superuser-actions"></a>
 
-## Next Steps
+### 审计超级用户操作
 
-- **[Sessions](sessions.md)** — How session-based authentication works
-- **[Rate Limiting](../rate-limiting/index.md)** — Tier-based rate limit middleware
-- **[Exceptions](../api/exceptions.md)** — How `PermissionDeniedError` becomes 403
-- **[Production](../production.md)** — Hardening checklist
+服务端记录操作者和操作，日志基础设施提供 `correlation_id`、`support_id`，见[日志配置](../../user-guide/configuration/index.md)。
+
+<a id="next-steps"></a>
+
+## 后续步骤
+
+- **[会话](sessions.md)**：会话认证原理。
+- **[限流](../rate-limiting/index.md)**：按等级的限流。
+- **[异常处理](../api/exceptions.md)**：权限异常映射。
+- **[生产环境](../production.md)**：安全加固。

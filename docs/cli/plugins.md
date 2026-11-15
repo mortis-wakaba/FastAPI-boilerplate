@@ -1,21 +1,25 @@
-# Plugins
+<a id="plugins"></a>
 
-`bp` has two extension points, kept deliberately separate. They have different lifecycles and shouldn't share machinery:
+# 插件
 
-- **Command plugins** (`bp.commands`) — third-party Typer sub-apps mounted under the root, e.g. `bp aws deploy`. Pure CLI surface; the plugin doesn't touch the user's repo.
-- **Feature plugins** (`bp.features`) — code generators with a manifest that `bp feature` can list, install, and remove. Plugins of this kind mutate the user's repo (write files, edit settings, run hooks).
+bp 有两个刻意分离的扩展点，生命周期不同，不共用同一执行机制：
 
-Both are discovered via [Python entry points](https://packaging.python.org/en/latest/specifications/entry-points/), so a plugin is just a normal Python package on the user's machine.
+- **命令插件**（bp.commands）：挂载到根命令的第三方 Typer 子应用，如 bp aws deploy；提供命令行接口，不通过功能安装器修改仓库。
+- **功能插件**（bp.features）：带清单的代码生成器，设计上由 bp feature 列出、安装和移除，可写文件、改配置、运行钩子。
 
-## How Discovery Works
+两者通过 [Python entry points](https://packaging.python.org/en/latest/specifications/entry-points/) 发现，因此插件就是用户机器上安装的普通 Python 包。
 
-When `bp` starts, the root app:
+<a id="how-discovery-works"></a>
 
-1. Mounts in-tree command sub-apps (`deploy`, `env`)
-2. Calls `discover_command_plugins()` (from `cli.plugins`) which walks `entry_points(group="bp.commands")` and mounts each healthy result
-3. Builds the feature registry on demand: in-tree features merged with `discover_feature_plugins()` from `bp.features`
+## 发现机制
 
-A broken plugin never breaks `bp`. Discovery wraps each load in `try/except`, surfaces a `RuntimeWarning`, and continues with the working subset.
+bp 启动时：
+
+1. 挂载内置 deploy、env 子应用。
+2. 调用 cli.plugins 的 discover_command_plugins，遍历 `entry_points(group='bp.commands')`，挂载可正常加载的结果。
+3. 按需构建功能注册表，合并内置功能和从 bp.features 发现的插件。
+
+加载逐项包裹 try/except，损坏插件产生 RuntimeWarning 后跳过，其余仍可用：
 
 ```python
 # cli/src/cli/plugins.py (abridged)
@@ -27,17 +31,23 @@ def _safe_load(ep: EntryPoint) -> object | None:
         return None
 ```
 
-In-tree commands and features take precedence on name collisions — a plugin can't silently shadow a built-in.
+名称冲突时内置命令和功能优先，插件不能静默覆盖。
 
-## Command Plugins
+<a id="command-plugins"></a>
 
-Use a command plugin when you want to add new top-level verbs to `bp` without modifying the boilerplate. Examples: `bp fly deploy`, `bp pulumi up`, `bp lint custom-rules`.
+## 命令插件
 
-### Authoring a Command Plugin
+希望不修改模板就为 bp 添加顶层命令时使用，如 bp fly deploy、bp pulumi up、bp lint custom-rules。
 
-Create a Python package with a `typer.Typer` instance and register it under the `bp.commands` group.
+<a id="authoring-a-command-plugin"></a>
 
-#### 1. Package layout
+### 编写命令插件
+
+创建含 typer.Typer 实例的 Python 包，并注册到 bp.commands 组。
+
+<a id="1-package-layout"></a>
+
+#### 1. 包结构
 
 ```text
 bp-deploy-fly/
@@ -48,7 +58,10 @@ bp-deploy-fly/
         └── cli.py
 ```
 
-#### 2. `cli.py` — define the sub-app
+<a id="2-clipy-define-the-sub-app"></a>
+<a id="2-clipy--define-the-sub-app"></a>
+
+#### 2. 在 cli.py 定义子应用
 
 ```python
 import typer
@@ -70,7 +83,10 @@ def deploy(
     # ... real work here ...
 ```
 
-#### 3. `pyproject.toml` — declare the entry point
+<a id="3-pyprojecttoml-declare-the-entry-point"></a>
+<a id="3-pyprojecttoml--declare-the-entry-point"></a>
+
+#### 3. 在 pyproject.toml 声明入口
 
 ```toml
 [project]
@@ -86,9 +102,11 @@ fly = "bp_deploy_fly.cli:app"
 where = ["src"]
 ```
 
-The entry-point key (`fly`) becomes the sub-command name. The value (`bp_deploy_fly.cli:app`) is the import path to your `Typer` instance.
+键 fly 成为子命令名，值 bp_deploy_fly.cli:app 指向 Typer 实例的导入路径。
 
-#### 4. Install and use
+<a id="4-install-and-use"></a>
+
+#### 4. 安装并使用
 
 ```bash
 uv pip install bp-deploy-fly
@@ -102,23 +120,29 @@ uv run --no-sync bp --help
 uv run --no-sync bp fly deploy --region ord --yes
 ```
 
-### Best Practices for Command Plugins
+<a id="best-practices-for-command-plugins"></a>
 
-- **Pick a unique name.** `bp` warns if you collide with a built-in (`deploy`, `env`, `feature`) and ignores you. Pick something specific (`fly`, `aws`, `pulumi`) rather than generic (`cloud`, `tools`).
-- **Keep your sub-app self-contained.** Don't import from the host CLI's internals — use only the public Typer interface. The `cli.app` module is not a public API.
-- **Honor the global UX patterns.** Support `--yes` for non-interactive runs and `--dry-run` where it makes sense. Match the style of the in-tree commands.
-- **Don't block on broken external dependencies.** If your plugin needs `flyctl` or `kubectl`, check for it gracefully and surface a useful error — not a stack trace from `subprocess`.
+### 命令插件最佳实践
 
-## Feature Plugins
+- **名称唯一**：与 deploy、env、feature 冲突会告警并忽略。优先 fly、aws、pulumi 等具体名称，而非 cloud、tools。
+- **子应用独立**：只用公开 Typer 接口，不依赖宿主 CLI 内部实现，cli.app 不是公共 API。
+- **遵循交互约定**：非交互支持 --yes，适用时支持 --dry-run，与内置命令一致。
+- **妥善报告外部依赖缺失**：需要 flyctl、kubectl 时先检查并提供清晰错误，不直接暴露 subprocess 堆栈。
 
-Use a feature plugin when you want to **mutate the user's repo** — drop in a new module, add OAuth providers, wire up a payments integration, write migrations. Features have a manifest, plan, and installer lifecycle so they can apply, list, and (eventually) revert cleanly.
+<a id="feature-plugins"></a>
 
-!!! note "Feature plugins are designed for, but not yet wired to, `bp feature`"
-    The feature framework (`Feature`, `FeatureManifest`, `FeaturePlan`, `FeatureInstaller`) is fully implemented and the registry already discovers plugin features. The user-facing `bp feature` sub-app is not yet shipped — features are reachable today only via in-tree commands like `bp deploy generate`. The contract below is stable; once `bp feature {list,add,remove,info}` lands, your plugins will work without changes.
+## 功能插件
 
-### The Feature Contract
+需要**修改仓库**时使用，例如添加模块、OAuth 提供方、支付集成或迁移。功能通过清单、计划、安装器管理应用、列举和未来的撤销。
 
-A feature is a class that subclasses `cli.features.base.Feature`:
+!!! note "功能框架已实现，尚未接入 bp feature"
+    Feature、FeatureManifest、FeaturePlan、FeatureInstaller 已实现，注册表也能发现插件，但面向用户的 bp feature 子应用尚未发布。当前只能由 bp deploy generate 等内置命令使用功能框架。原文将下述契约标为稳定，并计划在 list / add / remove / info 发布后直接复用插件。
+
+<a id="the-feature-contract"></a>
+
+### 功能契约
+
+继承 cli.features.base.Feature：
 
 ```python
 from cli.features.base import Feature, FeatureManifest, FeaturePlan, FileOp
@@ -146,12 +170,14 @@ class MyFeature(Feature):
         )
 ```
 
-Two methods, both required:
+两个方法都必须实现：
 
-- **`manifest()`** — static metadata. Called by registry / list operations without executing anything.
-- **`plan(params, project)`** — given runtime parameters and a `ProjectContext`, return a concrete `FeaturePlan`.
+- **manifest()**：静态元数据，注册表和列表可调用，不实际执行安装。
+- **plan(params, project)**：接受运行参数和 ProjectContext，返回具体 FeaturePlan。
 
-### The Plan Schema
+<a id="the-plan-schema"></a>
+
+### 计划结构
 
 ```python
 @dataclass(frozen=True)
@@ -164,9 +190,11 @@ class FeaturePlan:
     hooks: tuple[Hook, ...] = ()          # reserved for v2 — installer raises NotImplementedError
 ```
 
-The schema covers today's "render Jinja templates to disk" and tomorrow's "mutate code + run a migration". Defining `Codemod` and `Hook` types now means feature plugins can declare them without breaking the contract when the installer learns to execute them.
+结构覆盖当前的 Jinja 渲染写盘及未来代码修改、迁移钩子。提前定义 Codemod、Hook 类型，使未来安装器支持它们时不破坏插件契约；当前声明这些操作会触发 NotImplementedError。
 
-#### `FileOp`
+<a id="fileop"></a>
+
+#### FileOp
 
 ```python
 @dataclass(frozen=True)
@@ -178,19 +206,23 @@ class FileOp:
     executable: bool = False
 ```
 
-The installer renders `template` with the plan's `template_context` and writes the result to `target`. If the target exists:
+安装器使用计划的 template_context 渲染 template，再写入 target。目标已存在时：
 
-| Flags                    | Behavior                                                    |
-|--------------------------|-------------------------------------------------------------|
-| Default                  | Prompt the user before overwriting                          |
-| `overwrite=True`         | Overwrite without asking                                    |
-| `skip_if_exists=True`    | Skip silently (preserves user customizations)               |
+| 设置 | 行为 |
+|------|------|
+| 默认 | 提示确认覆盖 |
+| overwrite=True | 不询问直接覆盖 |
+| skip_if_exists=True | 静默跳过，保留用户定制 |
 
-`executable=True` chmods the result with `+x` for owner/group/world.
+executable=True 为所有者、组及其他用户添加执行权限 +x。
 
-### Authoring a Feature Plugin
+<a id="authoring-a-feature-plugin"></a>
 
-#### 1. Package layout
+### 编写功能插件
+
+<a id="1-package-layout_1"></a>
+
+#### 1. 包结构
 
 ```text
 bp-feature-audit-log/
@@ -203,7 +235,10 @@ bp-feature-audit-log/
             └── audit_log_module.py.j2
 ```
 
-#### 2. `feature.py` — define the feature
+<a id="2-featurepy-define-the-feature"></a>
+<a id="2-featurepy--define-the-feature"></a>
+
+#### 2. 在 feature.py 定义功能
 
 ```python
 from pathlib import Path
@@ -242,9 +277,12 @@ class AuditLogFeature(Feature):
 feature = AuditLogFeature()
 ```
 
-A feature plugin writes into a directory that still exists in the layout — that's why this example targets `src/modules/<name>/` rather than the old `auth/oauth/providers/` path. OAuth providers are no longer separate files: they're configured with crudauth's `OAuthCredentials` in `infrastructure/auth/setup.py`, so an "add an OAuth provider" plugin would edit that file (e.g. via an idempotent patch op) instead of dropping in a new module.
+插件应写入当前布局中实际存在的目录。因此示例采用 src/modules/<name>/，而非旧 auth/oauth/providers/。OAuth 不再按提供方拆文件，而是在 infrastructure/auth/setup.py 通过 crudauth OAuthCredentials 配置。因此添加提供方应修改该文件，例如幂等补丁，而非新建旧式模块。
 
-#### 3. `pyproject.toml` — declare the entry point
+<a id="3-pyprojecttoml-declare-the-entry-point_1"></a>
+<a id="3-pyprojecttoml--declare-the-entry-point_1"></a>
+
+#### 3. 在 pyproject.toml 声明入口
 
 ```toml
 [project]
@@ -266,9 +304,11 @@ where = ["src"]
 "*" = ["*.j2"]
 ```
 
-Note `include-package-data = true` and the `package-data` glob — without these, your Jinja templates won't ship with the wheel.
+必须配置 include-package-data 和 package-data 通配规则，否则 Jinja 模板不会打入 wheel。
 
-#### 4. Install
+<a id="4-install"></a>
+
+#### 4. 安装
 
 ```bash
 uv pip install bp-feature-audit-log
@@ -276,18 +316,25 @@ uv pip install bp-feature-audit-log
 # uv run --no-sync bp feature add audit-log --retention-days 90
 ```
 
-### Best Practices for Feature Plugins
+<a id="best-practices-for-feature-plugins"></a>
 
-- **Be idempotent.** A user running your feature twice should be safe. Use `skip_if_exists=True` for files that the user might customize after first install.
-- **Don't fight the user's structure.** Use `ProjectContext.backend_dir` and `ProjectContext.repo_root` rather than hardcoded paths — different projects may move things.
-- **Declare every file.** Don't write files outside the plan. The installer's behavior (dry-run, idempotency, overwrite prompts) only works for files declared in the plan.
-- **Put templates next to the feature.** `Path(__file__).parent / "templates"` is the canonical pattern. Keeps the plugin self-contained.
-- **Use Jinja's `StrictUndefined`.** The bundled `Renderer` does this for you — missing context variables fail loudly rather than rendering empty strings.
-- **Document required `params`.** Once `bp feature` lands, your manifest's `summary` is the first thing users see; document params clearly there.
+### 功能插件最佳实践
 
-## Discovery & Diagnosis
+- **幂等**：重复运行应安全。用户可能修改的文件使用 skip_if_exists=True。
+- **尊重项目结构**：使用 ProjectContext.backend_dir / repo_root，不写死路径。
+- **声明全部文件**：不在计划外写文件，否则 dry-run、幂等和覆盖确认无法生效。
+- **模板放功能旁**：采用 `Path(__file__).parent / 'templates'`，保持包独立。
+- **使用 StrictUndefined**：内置 Renderer 已开启，缺上下文变量明确失败，而非渲染空字符串。
+- **记录必要参数**：未来 feature 命令的 manifest summary 是用户入口，应清楚说明 params。
 
-### Listing Plugins
+<a id="discovery-diagnosis"></a>
+<a id="discovery--diagnosis"></a>
+
+## 发现与诊断
+
+<a id="listing-plugins"></a>
+
+### 列出插件
 
 ```bash
 # In-tree + plugin commands
@@ -297,7 +344,9 @@ uv run --no-sync bp --help
 # uv run --no-sync bp feature list
 ```
 
-### Inspecting Entry Points
+<a id="inspecting-entry-points"></a>
+
+### 检查 entry points
 
 ```bash
 uv run --no-sync python -c "
@@ -309,26 +358,37 @@ for ep in entry_points(group='bp.features'):
 "
 ```
 
-### Troubleshooting
+<a id="troubleshooting"></a>
 
-#### My plugin doesn't appear in `bp --help`
+### 故障排查
 
-1. **Confirm it's installed in the right venv.** Run the entry-point inspection script above. If your plugin isn't listed, the package isn't installed where `bp` runs.
-2. **Check for load warnings.** `bp` prints `warning: Failed to load plugin ...` to stderr if your plugin's import fails. Run `bp --help 2>&1` to make sure stderr isn't being suppressed.
-3. **Confirm your entry-point shape.** For commands, the value must resolve to a `typer.Typer` instance. For features, a `Feature` instance or a callable returning one.
+<a id="my-plugin-doesnt-appear-in-bp-help"></a>
+<a id="my-plugin-doesnt-appear-in-bp---help"></a>
 
-#### My plugin shadows a built-in
+#### 插件未出现在 bp --help
 
-`bp` warns and ignores plugins that try to register a name already in use by a built-in (`deploy`, `env`, `feature`). Rename your plugin to a unique key.
+1. **确认安装到正确虚拟环境**：运行上面的入口检查脚本，未列出表示没有装到 bp 使用的环境。
+2. **检查加载警告**：导入失败向 stderr 输出 warning: Failed to load plugin，可运行 `bp --help 2>&1` 确保没有隐藏。
+3. **检查入口类型**：命令必须解析为 typer.Typer；功能为 Feature 实例或返回实例的 callable。
 
-#### My templates aren't shipping in the wheel
+<a id="my-plugin-shadows-a-built-in"></a>
 
-Set `include-package-data = true` in `pyproject.toml` and add a `package-data` glob like `"*" = ["*.j2"]`. Without these, Jinja templates next to your code aren't included in the built wheel.
+#### 插件与内置名称冲突
 
-## Roadmap
+bp 会告警并忽略占用 deploy、env、feature 的插件，改成唯一名称。
 
-- **`bp feature {list,add,remove,info}`** — user-facing surface for the feature framework. Currently the registry exists; the commands don't.
-- **Codemod execution** — apply AST-aware edits declared in `FeaturePlan.codemods`. Useful for "drop a module + register its router in `interfaces/main.py`" kinds of features.
-- **Post-install hooks** — execute commands declared in `FeaturePlan.hooks`. Useful for "after writing the migration, run `alembic upgrade head`" kinds of features.
+<a id="my-templates-arent-shipping-in-the-wheel"></a>
 
-The contracts (`Codemod`, `Hook`) are already in `cli.features.base` so plugin authors can declare them today without breaking the schema later.
+#### wheel 中没有模板
+
+pyproject.toml 设置 include-package-data=true，并添加如 `"*" = ["*.j2"]` 的 package-data 通配规则，否则代码旁的模板不会打包。
+
+<a id="roadmap"></a>
+
+## 路线图
+
+- **bp feature {list,add,remove,info}**：功能框架的用户命令，目前只有注册表。
+- **Codemod 执行**：应用 FeaturePlan.codemods 声明的 AST 修改，适合添加模块并注册路由。
+- **安装后钩子**：执行 FeaturePlan.hooks 中的命令，如生成迁移后运行 alembic upgrade head。
+
+Codemod、Hook 已在 cli.features.base 定义，插件作者可以声明而不改变未来结构，但不代表当前安装器能够执行。

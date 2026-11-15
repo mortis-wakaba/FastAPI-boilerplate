@@ -1,21 +1,27 @@
-# Sessions
+<a id="sessions"></a>
 
-Sessions are the boilerplate's default authentication mechanism. All built-in API routes use session auth.
+# 会话
 
-## Auth Architecture
+会话是模板默认的认证机制，内置 API 路由使用会话认证。
 
-Authentication is provided by the [`crudauth`](https://pypi.org/project/crudauth/) library. The composition root is a single singleton in `infrastructure/auth/setup.py`:
+<a id="auth-architecture"></a>
+
+## 认证架构
+
+认证由 [`crudauth`](https://pypi.org/project/crudauth/) 提供，组装入口是 `infrastructure/auth/setup.py` 中的单例：
 
 ```python
 # infrastructure/auth/setup.py
 auth = CRUDAuth(session=async_session, user_model=User, SECRET_KEY=settings.SECRET_KEY, ...)
 ```
 
-Routers and dependencies reference `auth` at import time, and the app lifespan calls `auth.initialize()` on startup and `auth.shutdown()` on teardown (wired in `app_factory`) to open and close the session backend connections. Everything below — the dependencies, login flow, CSRF, lockout, and session storage — is this singleton in action; the boilerplate only supplies the wiring and route handlers.
+路由和依赖在导入时引用 `auth`。应用生命周期通过 `app_factory` 在启动时调用 `auth.initialize()`，关闭时调用 `auth.shutdown()`，建立和释放会话后端连接。下文的依赖、登录、CSRF、锁定和存储都由该单例提供，模板只负责组装及路由处理。
 
-## Protecting Routes
+<a id="protecting-routes"></a>
 
-Import the session dependencies and add them to your routes:
+## 保护路由
+
+导入会话依赖并添加到路由：
 
 ```python
 from typing import Annotated, Any
@@ -33,13 +39,15 @@ async def get_profile(
     return {"user_id": current_user["id"], "email": current_user["email"]}
 ```
 
-If the request doesn't have a valid session, the boilerplate returns `401 Unauthorized`.
+无有效会话时返回 `401 Unauthorized`。
 
-### Available Dependencies
+<a id="available-dependencies"></a>
 
-All from `src/infrastructure/auth/dependencies.py`. They wrap the `crudauth` `auth` singleton, so cookie validation, CSRF, and login lockout live in the library while your handlers keep working with plain user dicts.
+### 可用依赖
 
-**`get_current_user`** — Returns the authenticated user dict. Raises 401 if not authenticated.
+均位于 `src/infrastructure/auth/dependencies.py`，封装 crudauth 单例。Cookie 校验、CSRF 和锁定由库完成，处理器继续使用普通用户字典。
+
+**`get_current_user`**：返回已认证用户字典，未认证抛出 401。
 
 ```python
 @router.get("/dashboard")
@@ -49,7 +57,7 @@ async def dashboard(
     return {"welcome": current_user["username"]}
 ```
 
-**`get_current_superuser`** — Same as `get_current_user`, plus checks `is_superuser=True`. Raises 403 if not a superuser.
+**`get_current_superuser`**：额外检查 `is_superuser=True`，非超级用户返回 403。
 
 ```python
 @router.delete("/users/{user_id}")
@@ -61,7 +69,7 @@ async def delete_user(
     ...
 ```
 
-**`get_optional_user`** — Returns the user dict if authenticated, `None` otherwise. Never raises.
+**`get_optional_user`**：已认证返回用户字典，否则 None。原文将其描述为不抛异常的变体。
 
 ```python
 @router.get("/products")
@@ -73,9 +81,9 @@ async def list_products(
         ...
 ```
 
-**`get_current_principal`** — Returns the crudauth `Principal` (session-validated, CSRF-enforced). Use it when you need the session id (`principal.metadata["session_id"]`) or the `user_id` directly rather than the full user dict. `get_optional_principal` is the never-raises variant.
+**`get_current_principal`**：返回经过会话和 CSRF 校验的 crudauth `Principal`。需要 `principal.metadata["session_id"]` 或直接使用 `user_id` 时使用。`get_optional_principal` 是可选变体。
 
-**`get_current_permissions`** — Returns the permissions the caller effectively holds through the roles assigned to them, as a `frozenset[str]`. FastAPI caches it for the length of the request, so the lookup runs once however many guards ask for it. Superusers hold every registered permission.
+**`get_current_permissions`**：以 `frozenset[str]` 返回用户角色赋予的有效权限。FastAPI 在请求内缓存，多次保护只查一次。超级用户拥有全部已注册权限。
 
 ```python
 @router.patch("/{username}")
@@ -87,7 +95,7 @@ async def update_user_profile(
         ...
 ```
 
-**`require_permissions(*names)`** — Returns a dependency that raises 403 unless the caller holds every named permission. Superusers pass. It injects nothing, so it goes in the route's `dependencies`:
+**`require_permissions(*names)`**：缺少任意权限时返回 403，超级用户通过。不注入值，应放在路由 `dependencies` 中：
 
 ```python
 from ...infrastructure.auth.authorization import require_permissions
@@ -98,11 +106,13 @@ async def get_users(...) -> dict[str, Any]:
     ...
 ```
 
-See [Permissions](permissions.md#role-based-permissions) for declaring the names these take.
+权限声明见[权限](permissions.md#role-based-permissions)。
 
-### Protecting Entire Routers
+<a id="protecting-entire-routers"></a>
 
-Apply auth to every route in a router:
+### 保护整个路由器
+
+为路由器全部接口应用认证：
 
 ```python
 router = APIRouter(
@@ -117,75 +127,52 @@ async def stats() -> dict[str, Any]:
     ...
 ```
 
-Note: router-level dependencies don't inject values into handlers. If you need the user object inside the handler, also add `Depends(get_current_user)` to that specific route.
+路由器级依赖不向处理器注入值。处理器需要用户对象时，仍在该路由添加 `Depends(get_current_user)`。
 
-## How Sessions Work
+<a id="how-sessions-work"></a>
 
-The login route delegates to the `crudauth` `auth` singleton (see [Auth Architecture](#auth-architecture)). When a user hits `POST /api/v1/auth/login`, crudauth:
+## 会话工作方式
 
-1. Applies its per-IP / per-identifier login lockout (returns `429` + `Retry-After` if tripped)
-2. Validates the credentials against the user row (soft-deleted users — `is_active == False` — are rejected)
-3. Writes a session record to the configured backend (Redis by default), under an HMAC of the
-   session id rather than the id itself
-4. Generates a CSRF token bound to the session
-5. Sets two cookies on the response:
-    - `session_id` — HTTP-only, the session identifier
-    - `csrf_token` — readable by JS, mirrors the CSRF token returned in the JSON body
+`POST /api/v1/auth/login` 委托给 crudauth 单例（见[认证架构](#auth-architecture)），依次：
 
-On every subsequent request, the auth dependency (via crudauth):
+1. 检查 IP 和登录标识锁定，超限返回 `429` 和 `Retry-After`。
+2. 校验用户凭据，拒绝 `is_active == False` 的软删除用户。
+3. 在默认 Redis 等配置后端写会话，使用会话 ID 的 HMAC 而非原始 ID 作为键。
+4. 生成绑定会话的 CSRF 令牌。
+5. 设置两个 Cookie：HttpOnly 的 `session_id`，以及 JavaScript 可读、与 JSON 响应一致的 `csrf_token`。
 
-1. Reads `session_id` from cookies
-2. Looks it up in the configured backend, by that same HMAC; rejects expired or missing sessions
-3. For mutating requests (POST/PUT/DELETE/PATCH), validates the CSRF token if `CSRF_ENABLED=true`
-4. Hands back a `Principal`; `get_current_user` then re-loads the full user row (joined with the `Tier` relationship via `lazy="selectin"`)
+后续请求中，crudauth 依赖：
 
-Signing in again ends the session the browser presented, so a cookie somebody copied stops working
-at the account's next login.
+1. 从 Cookie 读取 `session_id`。
+2. 用同样 HMAC 查询后端，拒绝缺失或过期会话。
+3. `CSRF_ENABLED=true` 时，对 POST / PUT / DELETE / PATCH 校验 CSRF。
+4. 返回 `Principal`，`get_current_user` 再加载完整用户行，并通过 `lazy="selectin"` 加载 `Tier`。
 
-The store never holds a session id or a CSRF token: each is kept under an HMAC keyed with
-`SECRET_KEY`. Read access to the store yields nothing anybody can sign in with, and changing
-`SECRET_KEY` signs everyone out.
+重新登录会结束浏览器原先携带的会话，被复制的旧 Cookie 在账户下次登录后失效。
 
-crudauth's session-management routes are mounted beside the project's own: `GET /sessions`,
-`DELETE /sessions/{handle}`, `POST /logout-all` and `POST /csrf/refresh` — see
-[Manage Devices](#manage-devices).
+存储不保留原始会话 ID 和 CSRF 令牌，两者使用以 `SECRET_KEY` 为密钥的 HMAC。只读访问存储无法获得可登录凭据，更改 `SECRET_KEY` 会使所有人退出。
 
-Logout (`POST /api/v1/auth/logout`) hands the request to the session transport's
-`complete_logout`, which terminates the session record, clears the cookies of every configured
-transport and runs the `on_after_logout` hook with the ended session's handle — so an audit log
-registered through `AuthHooks` sees a logout the same way it sees a login. To end every session the
-user holds on all devices (e.g. after a suspected compromise), use `POST /api/v1/auth/logout-all`.
-See [Logout All Sessions](#logout-all-sessions).
+crudauth 管理路由与项目路由并列挂载：`GET /sessions`、`DELETE /sessions/{handle}`、`POST /logout-all`、`POST /csrf/refresh`，见[设备管理](#manage-devices)。
 
-Two credential changes end sessions on their own: a completed password reset, and a confirmed email
-change, which ends every session the account had because the address is what recovers it
-(`infrastructure/auth/evictions.py`). Neither keeps the session that asked, since both are confirmed
-through a link clicked from a mailbox, which carries none. `change-password` is the one that keeps
-it, because the request holding the current password is the session making the change.
+`POST /api/v1/auth/logout` 调用会话传输的 `complete_logout`，删除会话、清除各配置传输的 Cookie，并以结束会话的 handle 调用 `on_after_logout`。通过 `AuthHooks` 注册的审计可同时看到登录和退出。怀疑泄露时，使用 `POST /api/v1/auth/logout-all` 结束全部设备会话，见[退出全部会话](#logout-all-sessions)。
 
-### Two timeouts
+密码重置完成和邮箱变更确认会自动结束全部会话，后者由 `infrastructure/auth/evictions.py` 实现，因为邮箱是账户恢复凭据。这两种操作通过邮件链接确认，不保留发起会话。`change-password` 则保留当前会话，因为它携带当前密码。
 
-`SESSION_TIMEOUT_MINUTES` is an idle timeout: every authenticated request slides it forward, so a
-session in use never ends on its own. `SESSION_ABSOLUTE_TIMEOUT_HOURS` caps a session from sign-in
-however active it stays, for a project that wants a periodic re-login. It is unset by default, which
-leaves the idle timeout as the only one; a value below 1 is refused at startup rather than expiring
-every session the moment it is created. A session past the cap is removed, not just rejected, and
-the next request answers `401`.
+<a id="two-timeouts"></a>
 
-### Asking for a fresh sign-in
+### 两种超时
 
-Some actions want proof that whoever holds the cookie is still at the keyboard. Set
-`FRESH_SIGN_IN_SECONDS` and the routes that ask for one refuse a session that signed in longer ago
-than that, with `403 Sign in again to continue.`; the client sends the user back through
-`/api/v1/auth/login` and retries. Only a session can be fresh, so an API key or any other
-credential never is.
+`SESSION_TIMEOUT_MINUTES` 是空闲超时，认证请求会续期，持续使用的会话不会因此结束。`SESSION_ABSOLUTE_TIMEOUT_HOURS` 限制自登录起的总时长，可要求定期重新登录，默认未设置，仅使用空闲超时。小于 1 的值在启动拒绝，避免新会话立即过期。达到上限会删除会话，下次请求返回 `401`。
 
-Unset, closing an account asks nothing, while crudauth's own `/set-password` and MFA-enrolment
-routes — where a project mounts them; this one mounts neither — keep crudauth's 10-minute default.
-Setting it applies one window to all of them.
+<a id="asking-for-a-fresh-sign-in"></a>
 
-`DELETE /api/v1/users/{username}`, closing an account, is the route this project gates on it. To ask
-it of one of your own, take `FreshSessionPrincipalDep` instead of `SessionPrincipalDep`:
+### 要求近期重新登录
+
+敏感操作可能要求持有 Cookie 的人再次证明身份。设置 `FRESH_SIGN_IN_SECONDS` 后，要求新鲜会话的路由会对登录时间过久的会话返回 `403 Sign in again to continue.`，客户端重新走 `/api/v1/auth/login` 后重试。只有会话可以满足，API 密钥等其他凭据不能。
+
+未设置时，关闭账户不要求重新登录；crudauth 的 `/set-password` 和 MFA 注册路由在挂载时仍使用 10 分钟默认值，本项目未挂载这两者。设置后所有相关路由使用同一窗口。
+
+本项目的 `DELETE /api/v1/users/{username}` 受此限制。自定义路由可用 `FreshSessionPrincipalDep` 替代 `SessionPrincipalDep`：
 
 ```python
 from src.infrastructure.auth.deps import FreshSessionPrincipalDep
@@ -195,12 +182,14 @@ from src.infrastructure.auth.deps import FreshSessionPrincipalDep
 async def close_billing(principal: FreshSessionPrincipalDep) -> dict[str, str]: ...
 ```
 
-## CSRF Protection
+<a id="csrf-protection"></a>
 
-Session auth ships with CSRF protection. For non-GET requests, send the CSRF token via either:
+## CSRF 防护
 
-- The `csrf_token` cookie (browsers send it automatically), or
-- The `X-CSRF-Token` header (typical for JS clients)
+会话认证内置 CSRF。原文说明非 GET 请求可通过以下方式提交：
+
+- 浏览器自动发送的 `csrf_token` Cookie。
+- JavaScript 客户端常用的 `X-CSRF-Token` 请求头。
 
 ```javascript
 const csrfToken = getCookie('csrf_token');
@@ -216,16 +205,18 @@ await fetch('/api/v1/users/', {
 });
 ```
 
-Need a fresh token mid-session? Hit `POST /api/v1/auth/csrf/refresh` — it returns the session's token, minting a new one only when the old is gone or expired, and sets the cookie.
+会话中需要刷新令牌时调用 `POST /api/v1/auth/csrf/refresh`，有效令牌原样返回，仅在缺失或过期时新建，并设置 Cookie。
 
-## Passwords
+<a id="passwords"></a>
 
-crudauth's account routes are mounted under `/api/v1/auth`:
+## 密码
 
-| Route | What it does |
-|---|---|
-| `POST /api/v1/auth/change-password` | Verifies `current_password`, sets `new_password`, bumps `token_version` and revokes the account's **other** sessions, keeping the current one. At most 5 calls per hour per account, successes included |
-| `GET /api/v1/auth/me` | The identity crudauth resolved: id, username, email, superuser, scopes, transport |
+crudauth 账户路由挂载在 `/api/v1/auth`：
+
+| 路由 | 行为 |
+|------|------|
+| `POST /api/v1/auth/change-password` | 校验 `current_password`，设置 `new_password`，推进 `token_version`，撤销其他会话并保留当前会话；每账户每小时最多 5 次，成功也计数 |
+| `GET /api/v1/auth/me` | 返回解析的身份：ID、用户名、邮箱、超级用户、scope、传输方式 |
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/change-password \
@@ -235,16 +226,9 @@ curl -X POST http://localhost:8000/api/v1/auth/change-password \
   -d '{"current_password": "<current>", "new_password": "<new>"}'
 ```
 
-A wrong `current_password` answers `401`, a missing `X-CSRF-Token` answers `403`, and a
-`new_password` that breaks the policy answers `422`. This route and the email change on
-is capped at 5 per hour per account. Every call that checks a password counts, whether the password
-was right or wrong; past that the route answers `429`.
+当前密码错误返回 `401`，缺少 `X-CSRF-Token` 返回 `403`，新密码不符合策略返回 `422`。改密与邮箱变更共用每账户每小时 5 次预算，所有校验密码的调用都计数，超过后返回 `429`。
 
-crudauth also ships `POST /set-password`, for an account that has no password. This app does **not**
-mount it: it would let anyone holding a session put a password on a provider-only account, which is
-a takeover whenever a session is borrowed. An account that signs in with a provider sets its first
-password the same way anyone recovers a forgotten one — through the reset link, which proves the
-address before it accepts a new password:
+crudauth 还有面向无密码账户的 `POST /set-password`，本应用**未挂载**，避免持有借用会话的人给纯 OAuth 账户添加密码。首次设置密码应使用重置链接，先证明邮箱归属：
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/password/reset-request \
@@ -252,21 +236,25 @@ curl -X POST http://localhost:8000/api/v1/auth/password/reset-request \
 # then POST the token from the link to /api/v1/auth/password/reset-confirm
 ```
 
-After that the account can sign in with either the provider or its password. See
-[Recovery Flows](index.md#recovery-flows-email).
+之后可用提供方或密码登录，见[恢复流程](index.md#recovery-flows-email)。
 
-Hashes another system wrote are accepted at login through `legacy_verifiers`, and replaced with
-crudauth's own as each owner signs in once — see [Migrating Passwords](migrating-passwords.md).
+旧系统哈希可通过 `legacy_verifiers` 登录，并在首次成功时转为 crudauth 格式，见[迁移密码](migrating-passwords.md)。
 
-For dev/test environments where CSRF gets in the way, set `CSRF_ENABLED=false`.
+开发测试中可设置 `CSRF_ENABLED=false`。
 
-## Device Tracking
+<a id="device-tracking"></a>
 
-`crudauth` records session metadata (IP address, User-Agent, timestamps) internally as part of each session record. The boilerplate does **not** surface a device-listing route or a `SessionData` schema — that metadata lives inside the library's session store. If you need an "active sessions" UI, build it on crudauth's session APIs (`auth.sessions`) rather than expecting a ready-made dependency here.
+## 设备跟踪
 
-## Login Lockout
+crudauth 在会话内记录 IP、User-Agent 和时间戳。本节原文称模板没有设备列表路由或 `SessionData` Schema，需要活动会话界面时使用 `auth.sessions` 构建。
 
-Failed login attempts are throttled by `crudauth` itself. It applies an **escalating per-IP / per-identifier lockout** and, once tripped, returns `429 Too Many Requests` with a `Retry-After` header on `/api/v1/auth/login`. The thresholds are four settings, passed to crudauth as a `LockoutConfig` in `infrastructure/auth/setup.py`:
+> 译注：此描述与本页后文已有设备管理接口的说明不一致。
+
+<a id="login-lockout"></a>
+
+## 登录锁定
+
+crudauth 按 IP 和登录标识**逐级锁定**。达到阈值，`/api/v1/auth/login` 返回带 `Retry-After` 的 `429 Too Many Requests`。四个配置通过 `infrastructure/auth/setup.py` 的 `LockoutConfig` 传入：
 
 ```env
 LOGIN_MAX_ATTEMPTS=5             # failures allowed inside the window, per address and per account
@@ -275,14 +263,15 @@ LOGIN_LOCKOUT_BASE_SECONDS=300   # first lockout, doubling each round
 LOGIN_LOCKOUT_MAX_SECONDS=3600   # ceiling for the doubling
 ```
 
-The window is the value that matters against a paced attack: crudauth's own default counts over 60 seconds, so five tries a minute never accumulate. A successful login clears the account's failures and the pressure its own failures put on that address. The admin panel counts on [two policies of its own](../admin-panel/configuration.md#login-authentication), with these same thresholds, so a failure at one door never counts against the other. Behind a reverse proxy, set `TRUSTED_PROXY_HOPS` so the lockout keys on the real client IP rather than the proxy's.
+时间窗口对缓慢攻击尤其重要：crudauth 默认只计 60 秒，因此每分钟五次不会累积。成功登录清除账户失败记录及其对来源地址造成的失败压力。管理后台使用[自己的两套策略](../admin-panel/configuration.md#login-authentication)，阈值相同，但两个入口互不累计。代理后设置 `TRUSTED_PROXY_HOPS` 以识别真实 IP。
 
-With `RATE_LIMITER_BACKEND=redis`, the counters live in Redis, and crudauth builds the lockout policy with `fail_open=False`. If that Redis is unreachable, **every login is refused** with `429` for the base lockout window rather than let through unchecked: an attacker can't disable the lockout by taking Redis down. Treat the limiter's Redis as a dependency logins need, and watch it: `GET /health/ready` answers `503` while it is unreachable, and the log names it (`rate_limiter`), alongside the database and the session store. It is its own connection (`RATE_LIMITER_REDIS_*`, against `CACHE_REDIS_*` for the cache), and the readiness probe asks each server once even when several settings point at the same one, as long as they reach it with the same credentials. `RATE_LIMITER_BACKEND=memory` keeps the counters in the process instead, which is fine for a single worker and useless across several. `RATE_LIMITER_BACKEND=database` keeps them in `crudauth_counters`, shared by every worker; the database's own readiness check then covers them, and the `rate_limiter` check reports nothing to reach.
+`RATE_LIMITER_BACKEND=redis` 时计数在 Redis，crudauth 锁定配置为 `fail_open=False`。Redis 不可达时，**所有登录都被拒绝**，返回基础锁定窗口的 `429`，而非绕过限制。把限流 Redis 视为登录必要依赖并监控：不可达时 `GET /health/ready` 返回 `503`，日志标记 `rate_limiter`，与数据库和会话存储并列。限流使用独立 `RATE_LIMITER_REDIS_*` 连接，缓存使用 `CACHE_REDIS_*`；多个配置以相同凭据指向同一服务器时，就绪探针只查询一次。`memory` 在进程内计数，只适合单 Worker；`database` 使用共享 `crudauth_counters`，由数据库就绪检查覆盖，`rate_limiter` 不再报告额外网络目标。
 
-### What a refusal records
+<a id="what-a-refusal-records"></a>
 
-Every refused password login writes one `WARNING` on the `src.infrastructure.auth.audit` logger,
-through crudauth's `on_login_failed` and `on_lockout` hooks:
+### 拒绝记录什么
+
+每次密码登录拒绝都通过 crudauth 的 `on_login_failed` 和 `on_lockout` 在 `src.infrastructure.auth.audit` 记录一条 `WARNING`：
 
 ```
 login refused at the login api: 'ada' from 203.0.113.7 (curl/8.4.0); invalid_credentials
@@ -290,13 +279,9 @@ login refused at the login api: an identifier no account has from 203.0.113.7 (c
 login locked out at the login api for 300s, from 203.0.113.7 (curl/8.4.0)
 ```
 
-The reason is `invalid_credentials` or `inactive`, which the response does not distinguish — a
-disabled account and a wrong password are both `401`, and the log is where they are told apart. The
-address is the one `TRUSTED_PROXY_HOPS` resolves, so it is the client's rather than a proxy's.
+原因是 `invalid_credentials` 或 `inactive`。响应不区分，均为 `401`，日志才区分停用账户和密码错误。地址由 `TRUSTED_PROXY_HOPS` 解析，为客户端而非代理。
 
-The door is named because crudauth's routes are not the only door a login is refused at. The admin
-panel writes the same two lines where it refuses, since its login is its own and no hook of
-crudauth's runs for it:
+审计标记入口，因为 crudauth 不是唯一登录入口。后台有独立登录，不触发 crudauth 钩子，拒绝时自行记录相同两类日志：
 
 ```
 login refused at the admin panel: 'admin' from 203.0.113.7 (curl/8.4.0); invalid_credentials
@@ -304,37 +289,28 @@ login locked out at the admin panel for 300s, from 203.0.113.7 (curl/8.4.0)
 login locked out at the admin panel (every address) for 300s, from 198.51.100.9 (curl/8.4.0)
 ```
 
-The third is the budget every address shares running out, which the panel refuses exactly as it
-refuses one address's own lockout. Only the log says which of the two ran out.
+第三类表示全地址共用预算耗尽，响应与单地址锁定相同，只有日志区分。
 
-**An identifier is written out only where an account has it.** What arrives in the username field
-may be a typo, a probe, someone else's address or a password typed one box too high, so a refusal
-that resolved no account records only that, with the address and user agent an attack is recognised
-by. The lockout line names no identifier at all: it refuses the request before anything resolves
-one, and every attempt that filled the budget was already recorded.
+**只有识别到真实账户才记录标识**。用户名输入可能是拼写错误、探测、他人地址甚至误填密码，未识别账户时只记录未解析状态、地址和 User-Agent。锁定发生在解析前，不记录标识；此前消耗预算的每次尝试已单独记录。
 
-Both hooks run after the refusal is decided and cannot change it; an exception either one raises is
-logged by crudauth and the request answers normally. `infrastructure/auth/audit.py` is where a
-project sends these to an audit table or an external sink instead.
+钩子在拒绝结果确定后执行，不能改变结果。钩子异常由 crudauth 记录，请求仍正常响应。项目可在 `infrastructure/auth/audit.py` 改为写审计表或外部系统。
 
-## Running a second crudauth app beside this one
+<a id="running-a-second-crudauth-app-beside-this-one"></a>
 
-Two apps that each run crudauth — this API and another service, or a separate admin application —
-share whatever storage they point at. Nothing in crudauth namespaces itself per app, so the two
-collide wherever they meet:
+## 与另一个 crudauth 应用并存
 
-| What they share | What happens | How to separate them |
-|---|---|---|
-| The session and CSRF key space on one Redis database | The per-user index is keyed by user id, not by an HMAC, so each app's device list, `logout-all` and session cap reach the other's sessions for the same id, even if the ids name different people. With the same `SECRET_KEY`, a session cookie from one app also signs in to the other | A different `SESSION_REDIS_DB` (or `SESSION_REDIS_URL`), or `SessionTransport(storage_prefix="other:session:", csrf_storage_prefix="other:csrf:")` |
-| Cookie names in one browser | crudauth's cookies are `session_id` and `csrf_token` on path `/`, so the second login overwrites the first and the two apps sign each other out | `SessionTransport(cookie_name="other_session", csrf_cookie_name="other_csrf")` — the two names must differ from each other, which crudauth enforces |
-| Login lockout and throttle counters | A username or address locked out in one app is locked out of the other, and the two apps' failures add up | A different `RATE_LIMITER_REDIS_DB`, or a key prefix (below) |
-| `crudauth_store` / `crudauth_counters` in one database | The same collisions in rows rather than keys: the store indexes sessions by a `user_id` column, and the counters share their names | Separate databases or schemas, or the same prefixes: `storage_prefix` and the limiter's |
+两个应用指向同一存储时会共享数据，crudauth 不会自动按应用命名空间隔离：
 
-The tidiest separation in this project is the one it already uses between its own concerns: give the
-other app its own Redis database. The cache sits on `0`, the rate limiter on `1`, sessions on `2`
-and taskiq on `3`, so a second app starts at `4` and shares nothing.
+| 共享内容 | 后果 | 隔离方式 |
+|----------|------|----------|
+| 同 Redis DB 的会话和 CSRF 键空间 | 用户索引按用户 ID 而非 HMAC；同 ID 即使代表不同人，设备列表、全部退出和会话上限也会互相影响；`SECRET_KEY` 相同时 Cookie 可跨应用登录 | 独立 `SESSION_REDIS_DB` / `SESSION_REDIS_URL`，或 `SessionTransport(storage_prefix="other:session:", csrf_storage_prefix="other:csrf:")` |
+| 浏览器 Cookie 名称 | 默认 `session_id` 和 `csrf_token` 位于 `/`，第二个登录覆盖第一个 | 设置 `SessionTransport(cookie_name="other_session", csrf_cookie_name="other_csrf")`，两者名称也必须互不相同 |
+| 登录锁定和节流计数 | 一个应用锁定的地址或标识也在另一个锁定，失败累计 | 独立 `RATE_LIMITER_REDIS_DB`，或键前缀 |
+| 同数据库的 `crudauth_store` / `crudauth_counters` | 行级同样冲突，会话按 `user_id` 索引，计数共用名称 | 独立数据库或 schema，或使用存储和限流前缀 |
 
-Where they must share one database, prefix everything:
+最简单的隔离方式是与项目内部相同：独立 Redis DB。缓存 0、限流 1、会话 2、Taskiq 3，第二个应用可从 4 开始。
+
+必须共用一个 DB 时，为所有内容添加前缀：
 
 ```python
 # the other app's setup.py — not this one's
@@ -352,50 +328,37 @@ auth = CRUDAuth(
 )
 ```
 
-`rate_limit_prefix` applies to the limiter crudauth builds for itself, and crudauth refuses it
-together with `rate_limiter=`. This project passes its own limiter (`build_rate_limiter()` in
-`infrastructure/auth/limiter.py`), so the prefix belongs there instead —
-`redis_rate_limiter(client=..., prefix="other:rl:")`, or `database_store.rate_limiter(prefix=...)`
-on the database backend.
+`rate_limit_prefix` 仅适用于 crudauth 自建限流器，不能与 `rate_limiter=` 同时使用。本项目通过 `infrastructure/auth/limiter.py` 的 `build_rate_limiter()` 传入自己的限流器，因此应在那里设置 `redis_rate_limiter(client=..., prefix="other:rl:")`，数据库后端使用 `database_store.rate_limiter(prefix=...)`。
 
-The one-time-token, OAuth-state and MFA stores are keyed by values the server generates at random,
-so sharing their key space is harmless; a signed token from one app is refused by the other anyway
-unless both hold the same `SECRET_KEY`.
+一次性令牌、OAuth state、MFA 存储使用服务端随机值作为键，共用空间不会冲突；除非共用 `SECRET_KEY`，另一应用也不会接受签名令牌。
 
-!!! note "The admin panel is not one of these"
-    The panel this boilerplate ships is [sqladmin](../admin-panel/index.md), not a second crudauth
-    app. It authenticates against `ADMIN_USERNAME` / `ADMIN_PASSWORD` with a Starlette cookie of its
-    own — `admin_session`, signed with `SECRET_KEY` and scoped to the panel's mount — and it counts
-    its login failures in two lockouts of its own, under key prefixes of its own: one against the
-    identifier `admin-panel:<address>`, one against every address together. So one address has
-    separate budgets at the two doors, and nothing submitted to `/api/v1/auth/login` can lock the
-    panel out; the cost is that an address already failing at the API's door arrives at the panel
-    unslowed. None of the prefixes above apply to it.
+!!! note "模板管理后台不属于第二个 crudauth 应用"
+    后台是 [SQLAdmin](../admin-panel/index.md)，使用 `ADMIN_USERNAME` / `ADMIN_PASSWORD`，以及独立 Starlette Cookie `admin_session`，由 `SECRET_KEY` 签名且路径限定在后台挂载点。后台使用自己的前缀和两套锁定：`admin-panel:<address>` 及全部地址共享预算。因此 API 登录无法锁住后台，但在 API 失败的地址到后台仍有独立预算。上述前缀不适用于它。
 
-## Session Limits
+<a id="session-limits"></a>
 
-Per-user concurrent session count is capped by `MAX_SESSIONS_PER_USER` (default 5). When a user logs in beyond this cap, the oldest session is terminated.
+## 会话上限
 
-## Storage Backends
+`MAX_SESSIONS_PER_USER` 默认 5，超过时结束最旧会话。
 
-Sessions are stored server-side. Configure via `SESSION_BACKEND`:
+<a id="storage-backends"></a>
 
-| Value | When to use |
-|-------|-------------|
-| `redis` *(default)* | Production. Supports key expiration, pattern scans for cleanup, persists across restarts |
-| `memory` | Tests only. Cleared on restart, not safe for multi-process deploys |
+## 存储后端
 
-The backends ship inside the `crudauth` library, not the boilerplate — `setup.py` just selects `redis`, `database` or `memory` based on `SESSION_BACKEND`, and a value it has no store for is refused when the app starts. (Memcached is no longer a session option; it remains available for the general cache and rate limiter.)
+通过 `SESSION_BACKEND` 配置服务端存储：
 
-`database` keeps sessions, CSRF tokens, the one-time tokens behind the email flows and the OAuth
-state in two tables of this project's own database — `crudauth_store` and `crudauth_counters` —
-so several workers share them with no Redis to run. The tables are declared on the project's
-`Base.metadata`, so `alembic revision --autogenerate` writes them beside your own and
-`CREATE_TABLES_ON_STARTUP` creates them in development: switching to or from `database` is a
-schema change, and wants one migration. Expired rows are deleted as the store writes, and
-`DatabaseStore.purge_expired()` clears them all if you would rather run that on a schedule.
+| 值 | 用途 |
+|----|------|
+| `redis`，默认 | 生产；支持过期、模式扫描清理，进程重启后保留 |
+| `memory` | 仅测试；重启清空，不适合多进程 |
 
-## Configuration
+后端实现在 crudauth 内，`setup.py` 按配置选择 `redis`、`database` 或 `memory`，未知值在启动拒绝。Memcached 已不支持会话，原文称仍可用于一般缓存和限流器。
+
+`database` 将会话、CSRF、邮件一次性令牌和 OAuth state 放在项目数据库的 `crudauth_store`、`crudauth_counters` 两张表，多 Worker 无需 Redis 即可共享。表注册到 `Base.metadata`，Alembic 自动生成迁移，开发时可自动建表。切换 database 后端属于结构变更，需要迁移。存储写入时删除过期行，也可定期调用 `DatabaseStore.purge_expired()` 全量清理。
+
+<a id="configuration"></a>
+
+## 配置
 
 ```env
 # Backend
@@ -422,11 +385,16 @@ CSRF_ENABLED=true
 TRUSTED_PROXY_HOPS=0
 ```
 
-For development you'll typically set `SESSION_SECURE_COOKIES=false` and `CSRF_ENABLED=false` so cookies work over plain HTTP and curl/Postman aren't blocked. Re-enable both for staging and production.
+开发通常设置 `SESSION_SECURE_COOKIES=false` 和 `CSRF_ENABLED=false`，便于 HTTP 和 curl / Postman；预发布与生产重新开启。
 
-## Login & Logout Flow
+<a id="login-logout-flow"></a>
+<a id="login--logout-flow"></a>
 
-### Login
+## 登录与退出流程
+
+<a id="login"></a>
+
+### 登录
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/login \
@@ -435,26 +403,25 @@ curl -X POST http://localhost:8000/api/v1/auth/login \
   -c cookies.txt
 ```
 
-Response:
+响应：
 
 ```json
 { "id": 1, "username": "admin", "csrf_token": "..." }
 ```
 
-The HTTP-only `session_id` cookie is now in `cookies.txt`. The CSRF token is also set as a cookie *and* returned in the body so JS clients can store it (browsers can't read HTTP-only cookies).
+HttpOnly `session_id` 已保存在 `cookies.txt`。CSRF 令牌既设置 Cookie，也在响应体返回，方便 JavaScript 保存，因为 HttpOnly 会话 Cookie 不可读。
 
-Add `remember_me=true` to the form to make the session cookie persistent; without it the cookie ends
-with the browser session. A login the browser marks `Sec-Fetch-Site: cross-site` is refused with
-`403`, so another site can't sign a visitor into an account it controls. Clients that don't send the
-header, such as `curl` or a mobile app, are unaffected.
+表单增加 `remember_me=true` 可持久化 Cookie，否则随浏览器会话结束。浏览器标记 `Sec-Fetch-Site: cross-site` 的登录返回 `403`，防止其他站点将访问者登录到攻击者账户。不发该头的 curl、移动端不受影响。
 
-### Authenticated Request
+<a id="authenticated-request"></a>
+
+### 认证请求
 
 ```bash
 curl http://localhost:8000/api/v1/users/me -b cookies.txt
 ```
 
-For mutating requests, add the CSRF header:
+变更状态请求添加 CSRF 头：
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/users/ \
@@ -464,25 +431,29 @@ curl -X POST http://localhost:8000/api/v1/users/ \
   -d '{"name": "...", "username": "...", "email": "...", "password": "..."}'
 ```
 
-### Refresh CSRF Token
+<a id="refresh-csrf-token"></a>
+
+### 刷新 CSRF
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/csrf/refresh -b cookies.txt
 ```
 
-It self-heals: a token that is still valid comes back unchanged, so a client that calls it on every
-page load doesn't rotate a healthy one. Rate limited per address (crudauth's `csrf_refresh` default:
-30 per hour).
+有效令牌不轮换，可在每次页面加载调用。按地址限流，crudauth 的 `csrf_refresh` 默认每小时 30 次。
 
-### Logout
+<a id="logout"></a>
+
+### 退出
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/logout -b cookies.txt
 ```
 
-Terminates the session and clears the cookies.
+结束会话并清除 Cookie。
 
-### Logout All Sessions
+<a id="logout-all-sessions"></a>
+
+### 退出全部会话
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/auth/logout-all \
@@ -490,13 +461,13 @@ curl -X POST http://localhost:8000/api/v1/auth/logout-all \
   -H "X-CSRF-Token: <token-from-login-response>"
 ```
 
-Terminates **every** session for the current user across all devices, including this one, and clears the cookies:
+结束当前用户所有设备的**全部会话**，包括当前会话，并清除 Cookie：
 
 ```json
 { "detail": "Signed out of all sessions.", "revoked": 3 }
 ```
 
-To sign out only the *other* devices and stay logged in here, pass `keep_current=true`:
+只退出其他设备，保留当前登录时，传 `keep_current=true`：
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/auth/logout-all?keep_current=true" \
@@ -504,9 +475,11 @@ curl -X POST "http://localhost:8000/api/v1/auth/logout-all?keep_current=true" \
   -H "X-CSRF-Token: <token-from-login-response>"
 ```
 
-No re-authentication step is required, because this is the action a user needs when they can't trust their current session. It's rate limited per user (crudauth's `logout_all` default: 10 per hour).
+无需再次认证，因为这是用户怀疑当前会话不可信时需要的操作。按用户限流，`logout_all` 默认每小时 10 次。
 
-### Manage Devices
+<a id="manage-devices"></a>
+
+### 设备管理
 
 ```bash
 curl http://localhost:8000/api/v1/auth/sessions -b cookies.txt
@@ -519,9 +492,7 @@ curl http://localhost:8000/api/v1/auth/sessions -b cookies.txt
 ]
 ```
 
-Every session the account holds, with the caller's flagged `current`. `id` is the session's
-*handle*, never its id, so the listing is safe to render in a page: nothing in it authenticates.
-Sign one device out with it:
+列出全部会话，以 `current` 标记调用者。`id` 是会话 **handle** 而非凭据 ID，可安全展示，不能用于认证。按 handle 退出设备：
 
 ```bash
 curl -X DELETE http://localhost:8000/api/v1/auth/sessions/7f3c… \
@@ -529,26 +500,25 @@ curl -X DELETE http://localhost:8000/api/v1/auth/sessions/7f3c… \
   -H "X-CSRF-Token: <token-from-login-response>"
 ```
 
-Ownership is checked, and a handle that belongs to somebody else answers `404` — the same as one
-that doesn't exist, so the route reveals nothing. Revoking the caller's own handle clears its
-cookies. Every session backend this project offers can list a user's sessions: memory scans its
-entries, Redis keeps a per-user index, and the database store has a `user_id` column.
+检查归属，其他用户的 handle 与不存在的一样返回 `404`，避免泄露。撤销自身 handle 会清 Cookie。所有后端均支持列表：memory 扫描条目，Redis 使用用户索引，database 使用 `user_id` 列。
 
-## Key Files
+<a id="key-files"></a>
 
-| Component | Location |
-|-----------|----------|
-| `auth = CRUDAuth(...)` singleton | `backend/src/infrastructure/auth/setup.py` |
-| Dependencies | `backend/src/infrastructure/auth/dependencies.py` |
-| OAuth configuration | `backend/src/infrastructure/auth/setup.py` |
-| Login, logout and OAuth routes | `backend/src/infrastructure/auth/routes.py` |
-| Refused-login and lockout hooks | `backend/src/infrastructure/auth/audit.py` |
-| Session management routes | crudauth's `build_session_management_router`, mounted in `routes.py` |
-| HTTP exceptions (fastcrud re-export) | `backend/src/infrastructure/http_exceptions.py` |
-| Auth settings | `backend/src/infrastructure/config/settings.py` (`AuthSettings`) |
+## 关键文件
 
-Session storage, CSRF, and lockout themselves live in the `crudauth` library, not the boilerplate.
+| 组件 | 位置 |
+|------|------|
+| `auth = CRUDAuth(...)` 单例 | `backend/src/infrastructure/auth/setup.py` |
+| 依赖 | `backend/src/infrastructure/auth/dependencies.py` |
+| OAuth 配置 | `backend/src/infrastructure/auth/setup.py` |
+| 登录、退出与 OAuth 路由 | `backend/src/infrastructure/auth/routes.py` |
+| 登录拒绝与锁定钩子 | `backend/src/infrastructure/auth/audit.py` |
+| 会话管理路由 | crudauth 的 `build_session_management_router`，在 `routes.py` 挂载 |
+| HTTP 异常 | `backend/src/infrastructure/http_exceptions.py` |
+| 认证配置 | `backend/src/infrastructure/config/settings.py` 的 `AuthSettings` |
+
+会话存储、CSRF 和锁定实现在 crudauth 中，而非模板本身。
 
 ---
 
-[← Authentication Overview](index.md){ .md-button } [User Management →](user-management.md){ .md-button .md-button--primary }
+[← 认证概览](index.md){ .md-button } [用户管理 →](user-management.md){ .md-button .md-button--primary }

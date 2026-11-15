@@ -1,10 +1,14 @@
-# Testing
+<a id="testing"></a>
 
-The boilerplate ships pytest configured against `backend/tests/`, with `testcontainers[postgres]` for real-database tests and `httpx` for HTTP-level tests against the FastAPI app. A suite ships with it: unit tests beside every module and integration tests that run against a real Postgres, plus `tools/removal_drill.py`, which builds the project without each feature and runs the whole set again. This page covers the patterns they use.
+# 测试
 
-## What's Configured
+模板在 `backend/tests/` 配置 pytest，通过 `testcontainers[postgres]` 使用真实数据库，通过 httpx 在 HTTP 层测试 FastAPI。已有各模块单元测试及真实 Postgres 集成测试；`tools/removal_drill.py` 还会移除各功能后重新构建并运行检查。本页介绍这些模式。
 
-`backend/pyproject.toml`:
+<a id="whats-configured"></a>
+
+## 已有配置
+
+`backend/pyproject.toml`：
 
 ```toml
 [tool.pytest.ini_options]
@@ -22,31 +26,23 @@ markers = [
 ]
 ```
 
-What this gets you:
+提供：
 
-- **`asyncio_mode = "auto"`** — every `async def test_*` runs under pytest-asyncio; no decorator needed
-- **`--strict-markers`** — a typo in a marker fails the run instead of being ignored
-- **Markers** for `unit` / `integration` / `slow` — declared, and yours to apply: no test in the suite carries `unit` today, so `pytest -m unit` selects nothing until you mark some
+- **`asyncio_mode = 'auto'`**：所有 `async def test_*` 自动运行在 pytest-asyncio 下，无需装饰器。
+- **`--strict-markers`**：标记拼写错误直接失败。
+- **unit / integration / slow 标记**：已声明，需自行应用；当前无测试标记 unit，因此 `pytest -m unit` 暂不选择任何测试。
 
-`backend/tests/conftest.py` puts `backend/` on `sys.path` and loads the fixture
-modules `backend/tests/wiring.py` lists. Nothing forces an `ENVIRONMENT` on the suite: the settings
-accept only `local`, `development`, `staging` and `production`, and the validator runs its checks
-only in `production`.
+`backend/tests/conftest.py` 将 backend 加入 `sys.path`，加载 `backend/tests/wiring.py` 列出的 fixture。测试不强制 ENVIRONMENT，合法值为 local / development / staging / production，校验器仅在 production 执行对应检查。
 
-Available test dependencies (from the backend's `dev` extra, installed by
-`uv sync --all-packages --all-extras`):
+通过 `uv sync --all-packages --all-extras` 安装的 dev extra 包含 pytest、pytest-asyncio、pytest-mock、httpx、faker、testcontainers[postgres] 和支持并行的 pytest-xdist[psutil]。
 
-- `pytest`, `pytest-asyncio`, `pytest-mock`
-- `httpx` — for in-process HTTP testing
-- `faker` — for realistic fixture data
-- `testcontainers[postgres]` — for real-Postgres integration tests
-- `pytest-xdist[psutil]` — for parallel test execution
+未包含 pytest-cov。开发工具属于 extra 而非 dependency group，开始收集覆盖率时使用 `uv add --optional dev pytest-cov`。
 
-The repo doesn't currently bundle `pytest-cov`. The dev tools live in the `dev` extra, not in a dependency group, so add it with `uv add --optional dev pytest-cov` when you start tracking coverage.
+<a id="test-layout"></a>
 
-## Test Layout
+## 测试布局
 
-The suite lives in `backend/tests/`. What ships, and where your own tests go:
+已有测试及新增位置：
 
 ```text
 backend/tests/
@@ -75,14 +71,13 @@ backend/tests/
         └── test_migrations.py
 ```
 
-The split is a guideline, not a rule:
+分层是指导而非硬规则：单元测试通常模拟 FastCRUD 数据库边界，速度快；集成测试使用真实 Postgres，可通过 testcontainers 或本地数据库，覆盖 HTTP 层。
 
-- **Unit tests** mock the database (often by mocking the FastCRUD layer) and run fast
-- **Integration tests** use a real Postgres (via testcontainers or a local DB) and exercise the HTTP layer
+<a id="a-working-conftestpy"></a>
 
-## A Working `conftest.py`
+## 可用的 conftest.py
 
-This is the conftest you'd start from. It provides three layers of fixtures: the FastAPI `app`, an async `db_session`, and an `httpx.AsyncClient` whose database dependency is overridden to use the test session.
+以下提供三层 fixture：FastAPI app、异步 db_session，以及将数据库依赖替换成测试会话的 httpx.AsyncClient。
 
 ```python
 # tests/conftest.py
@@ -140,18 +135,20 @@ async def client(db_session) -> AsyncGenerator[AsyncClient, None]:
     app.dependency_overrides.clear()
 ```
 
-Key things to notice:
+要点：
 
-- **`testcontainers.PostgresContainer`** spins up a real Postgres, scoped to the test session. First test pays a few seconds of startup; later tests are fast.
-- **`db_session`** rolls back at the end of every test, so tests don't bleed into each other. The container is reused; the data is not.
-- **`app.dependency_overrides[async_session]`** swaps the production dependency for one that yields the test session — every route ends up reading/writing through your test transaction.
-- **`ASGITransport`** runs the FastAPI app in-process — no real HTTP server is started.
+- `PostgresContainer` 按测试会话启动真实 Postgres，首个测试承担数秒启动，后续复用。
+- 每测试结束回滚 db_session，容器复用但数据隔离。
+- `app.dependency_overrides[async_session]` 将生产依赖换为测试事务。
+- `ASGITransport` 在进程内运行，不启动真实 HTTP 服务器。
 
-If you don't want to depend on Docker for tests, swap `PostgresContainer` for a connection to a local Postgres (e.g. one already running for development). Use a separate database name (`test_db`, dropped at the end of the session).
+不依赖 Docker 时，可连接已有本地 Postgres，但使用独立测试数据库如 test_db，并在测试会话结束删除。
 
-## Writing Unit Tests
+<a id="writing-unit-tests"></a>
 
-Unit tests should not touch the database. Mock at the **CRUD layer** — your service contract is "I call `crud_widgets.get` and get back a dict-or-None", and that's the seam.
+## 单元测试
+
+不接触数据库，在 **CRUD 层**模拟。服务契约是调用 `crud_widgets.get` 返回字典或 None：
 
 ```python
 # tests/unit/modules/user/test_service.py
@@ -183,14 +180,15 @@ async def test_get_by_id_raises_when_missing(mocker):
         await UserService().get_by_id(user_id=999, db=AsyncMock())
 ```
 
-`pytest-mock`'s `mocker` fixture handles cleanup automatically. `AsyncMock` matches the async CRUD interface.
+pytest-mock 的 `mocker` 自动清理，AsyncMock 匹配异步接口。
 
-## Writing Integration Tests
+<a id="writing-integration-tests"></a>
 
-Integration tests use the real database via `client` and `db_session`. The session-based auth flow needs to be honored — `httpx.AsyncClient` keeps cookies between calls, so log in once and reuse the client.
+## 集成测试
 
-`build_user_create_payload` below comes from a helper you add — the boilerplate ships no factories.
-Its file is at the end of this section.
+通过 client 和 db_session 使用真实数据库。httpx.AsyncClient 在调用间保存 Cookie，登录一次后复用即可遵循会话流程。
+
+下方 `build_user_create_payload` 是需自行添加的 helper，模板不提供工厂，其文件在后面给出。
 
 ```python
 # tests/integration/api/test_users.py
@@ -222,7 +220,7 @@ async def test_register_login_and_fetch_me(client, db_session):
     assert me_response.json()["username"] == "alice"
 ```
 
-A small factory to keep payloads readable:
+小型数据工厂：
 
 ```python
 # tests/helpers/factories.py
@@ -241,9 +239,11 @@ def build_user_create_payload(**overrides) -> dict:
     }
 ```
 
-### Authenticating as a Specific User
+<a id="authenticating-as-a-specific-user"></a>
 
-Because session auth is cookie-based, the client retains the session for subsequent requests. For tests that need a logged-in superuser without going through the registration flow, seed a superuser directly via the service:
+### 指定身份认证
+
+测试无需走注册时，可通过服务直接创建超级用户，然后登录：
 
 ```python
 # tests/conftest.py (additional fixture)
@@ -267,20 +267,23 @@ async def superuser_client(client, db_session):
     yield client
 ```
 
-Then `superuser_client` is a logged-in `AsyncClient` for any test that needs admin access.
+`superuser_client` 可供需要管理员权限的测试使用。
 
-### Resetting the Session Between Tests
+<a id="resetting-the-session-between-tests"></a>
 
-By default, `httpx.AsyncClient` carries cookies for the lifetime of the client fixture. Since `client` is function-scoped, each test starts with no session. If you ever need to log out mid-test, call `await client.post("/api/v1/auth/logout/")` or clear cookies via `client.cookies.clear()`.
+### 测试间重置会话
 
-## CSRF in Tests
+AsyncClient 在 fixture 生命周期保存 Cookie，函数级 client 使每测试从无会话开始。测试中退出可调用 `await client.post('/api/v1/auth/logout/')`，或 `client.cookies.clear()`。
 
-If `CSRF_ENABLED=true` (the default), state-changing requests need a CSRF token. The boilerplate's CSRF flow uses double-submit cookies — the server sets a cookie, and you echo the value back in a header.
+<a id="csrf-in-tests"></a>
 
-Either:
+## 测试 CSRF
 
-- **Disable CSRF in the test environment** by setting `CSRF_ENABLED=false` in the test fixture. Quick and pragmatic for service-layer integration tests where CSRF isn't the focus.
-- **Honor the flow** for tests that need to assert it works:
+默认开启时，状态变更请求使用双重提交：服务端设 Cookie，客户端在头中回传。可选择：
+
+- 非 CSRF 重点的服务集成测试，设置 `CSRF_ENABLED=false`。
+- 验证完整流程时携带令牌：
+
   ```python
   # Hit a GET first so the server sets the CSRF cookie
   await client.get("/api/v1/auth/me/")  # any safe endpoint
@@ -292,20 +295,19 @@ Either:
   )
   ```
 
-See [Authentication → Sessions](authentication/sessions.md) for the CSRF specifics.
+详情见[会话](authentication/sessions.md)。
 
-## Testing Cached Endpoints
+<a id="testing-cached-endpoints"></a>
 
-The `@cache` decorator is process-aware: in tests, it talks to whichever cache backend `CACHE_BACKEND` points at. Two strategies:
+## 测试缓存接口
 
-- **Disable caching** — `CACHE_ENABLED=false` in the test environment. Simplest. The decorator becomes a no-op.
-- **Use a local Redis** — point `CACHE_REDIS_HOST` at `localhost` (or a testcontainer). Useful when the test specifically asserts caching behavior.
+装饰器使用 CACHE_BACKEND 指向的后端。一般测试关闭 `CACHE_ENABLED`，使装饰器不缓存；专门验证缓存和失效时，使用本地 Redis 或 testcontainer，测试放 integration。
 
-For most unit/integration tests, disable. Add explicit cache tests under `tests/integration/` only when you need to verify invalidation behavior.
+<a id="testing-background-tasks"></a>
 
-## Testing Background Tasks
+## 测试后台任务
 
-Taskiq tasks shouldn't actually run during tests. Use Taskiq's `InMemoryBroker` to make `.kiq()` calls execute synchronously:
+一般测试不启动实际 Worker，可用 Taskiq InMemoryBroker 在测试进程执行 `.kiq()`：
 
 ```python
 # tests/conftest.py (additional)
@@ -321,9 +323,11 @@ async def in_memory_broker(monkeypatch):
     yield test_broker
 ```
 
-Now `await my_task.kiq(...)` runs the task body in the test process. For tests that specifically assert "the task was scheduled" without running it, swap to a mock broker that records calls instead.
+若仅断言任务已安排、不执行任务体，则使用记录调用的模拟代理。
 
-## Running the Suite
+<a id="running-the-suite"></a>
+
+## 运行测试
 
 ```bash
 cd backend
@@ -351,63 +355,72 @@ uv run --no-sync pytest -n auto
 uv run --no-sync pytest --cov=src --cov-report=term-missing
 ```
 
-## Continuous Integration
+<a id="continuous-integration"></a>
 
-The repo's `.github/workflows/tests.yml` runs the test suite on PRs, along with the linting and
-type-checking workflows and a matrix job that runs `tools/removal_drill.py` for every preset. The
-workflows install the workspace from the repo root with `uv sync --all-packages --all-extras
---locked`, then `cd backend` for the suite, so the same `uv run --no-sync pytest` works there as
-locally.
+## 持续集成
 
-CI runs the whole suite, integration tests included: `.github/workflows/tests.yml` syncs the
-workspace and runs `pytest` on an `ubuntu-latest` runner, where Docker is available, so
-testcontainers starts its own Postgres. There is no `services:` block and none is needed.
+`.github/workflows/tests.yml` 在 PR 运行测试，另有 lint、类型检查及所有移除预设矩阵。工作流在根目录 `uv sync --all-packages --all-extras --locked`，再进入 backend 使用 `uv run --no-sync pytest`，与本地一致。
 
-On a runner without Docker — a container-based CI image, say — the database fixtures skip
-themselves, which makes a green run meaningless. Point the suite at a Postgres you start yourself,
-or keep a Docker-capable runner for the job.
+ubuntu-latest 提供 Docker，因此 testcontainers 自行启动 Postgres，无需 `services:` 块。CI 运行完整集成测试。
 
-## Common Mistakes
+没有 Docker 的 runner（如某些容器镜像）会使数据库 fixture 自行跳过，绿色结果不能代表这些测试通过。应提供自行启动的 Postgres，或使用支持 Docker 的 runner。
 
-### "My test isn't actually using the test database"
+<a id="common-mistakes"></a>
 
-Check that `app.dependency_overrides[async_session] = ...` matches the **same callable** the routes depend on. If a route does `Depends(some_other_db_dep)`, your override of `async_session` won't take effect. Look at the route's source.
+## 常见问题
 
-### "Tests pass individually but fail when run together"
+<a id="my-test-isnt-actually-using-the-test-database"></a>
 
-The most common cause: shared state in the database between tests. Either:
+### 未使用测试数据库
 
-- Make every test fixture roll back at the end (the `db_session` fixture above does)
-- Use `truncate` between tests instead of `create_all` / `drop_all` (faster on big schemas)
+覆盖的 `async_session` 必须与路由依赖为**同一个 callable**，路由用了其他依赖则不生效，应查看路由源码。
 
-### "Async tests hang"
+<a id="tests-pass-individually-but-fail-when-run-together"></a>
 
-Almost always missing `asyncio_mode = "auto"` in `pyproject.toml`, or a fixture that's `async def` but not `pytest_asyncio.fixture`-decorated. Both must match.
+### 单独通过、合跑失败
 
-### "Cookies aren't persisting between test calls"
+通常是数据库共享状态。确保每测试回滚，或测试间 truncate；大结构下 truncate 比反复建表更快。
 
-`httpx.AsyncClient` only keeps cookies if both calls go through the **same** client instance. If you create a new `AsyncClient` per request, you lose the session. Use the fixture client.
+<a id="async-tests-hang"></a>
 
-### "FastCRUD returns dicts, not models, in tests too"
+### 异步测试挂起
 
-Yes — that's the design. Don't try to `assert isinstance(result, Widget)`. Assert on dict keys: `assert result["name"] == "..."`.
+检查 `asyncio_mode='auto'`，以及 async fixture 是否正确使用 `pytest_asyncio.fixture`，两者需匹配。
 
-### "Test database has stale schema after model changes"
+<a id="cookies-arent-persisting-between-test-calls"></a>
 
-If you're using the `Base.metadata.create_all` shortcut (as in the conftest above), the schema rebuilds on every session. If you've added a fixture that rebuilds at module scope, restart the test session. For long-running test databases, run Alembic migrations in the fixture instead.
+### Cookie 不保留
 
-## Key Files
+两次请求必须使用同一个 AsyncClient，不要每请求新建。
 
-| Component                | Location                                                    |
-|--------------------------|-------------------------------------------------------------|
-| Pytest config            | `backend/pyproject.toml` (`[tool.pytest.ini_options]`)      |
-| Test root                | `tests/`                                                    |
-| Module under test (refs) | `backend/src/modules/user/`, `backend/src/modules/tier/`    |
-| Settings (test env)      | `backend/src/infrastructure/config/settings.py`             |
-| Models / `Base`          | `backend/src/infrastructure/database/models.py`             |
+<a id="fastcrud-returns-dicts-not-models-in-tests-too"></a>
 
-## Next Steps
+### FastCRUD 测试也返回字典
 
-- **[Development](development.md)** — broader development workflow
-- **[Production](production.md)** — what changes when shipping the test suite to CI
-- **[Authentication → Sessions](authentication/sessions.md)** — full session/CSRF flow you'll exercise in tests
+这是设计。断言 `result['name']` 等键，不断言 ORM Widget 类型。
+
+<a id="test-database-has-stale-schema-after-model-changes"></a>
+
+### 模型变更后结构仍旧
+
+示例使用 create_all，每测试会话重建；模块级重建 fixture 时需重启测试会话。长期测试库应在 fixture 中运行 Alembic。
+
+<a id="key-files"></a>
+
+## 关键文件
+
+| 组件 | 位置 |
+|------|------|
+| pytest 配置 | `backend/pyproject.toml` 的 `[tool.pytest.ini_options]` |
+| 测试根目录 | `tests/`，位于 backend 下 |
+| 被测参考模块 | `backend/src/modules/user/`、`backend/src/modules/tier/` |
+| 测试环境配置 | `backend/src/infrastructure/config/settings.py` |
+| 模型 / Base | 原文列 `backend/src/infrastructure/database/models.py`，Base 定义位置另见数据库章节 |
+
+<a id="next-steps"></a>
+
+## 后续步骤
+
+- **[开发指南](development.md)**：完整开发流程。
+- **[生产环境](production.md)**：部署及 CI 考虑。
+- **[会话](authentication/sessions.md)**：测试中的 Cookie 和 CSRF。
