@@ -145,3 +145,6 @@ src/.env
 
 # Don't ignore files inside of script folder:
 !scripts/*
+
+# 本地二次开发指南，不随仓库发布
+/docs/local/implementation-guide.md
