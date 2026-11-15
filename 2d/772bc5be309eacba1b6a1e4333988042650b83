@@ -1,0 +1,19 @@
+.gitignore
+  s_653c6efb6df5a1::t_da3456b7902a91 148-150
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2d772bc5be309eacba1b6a1e4333988042650b83",
+  "prompts": {},
+  "sessions": {
+    "s_653c6efb6df5a1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1d974-1356-7681-8e73-bf772901b701",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "mortis_wakaba <mortis_wakaba@qq.com>"
+    }
+  }
+}
